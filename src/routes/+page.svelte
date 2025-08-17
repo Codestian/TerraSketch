@@ -6,7 +6,7 @@
 </script>
 
 <svelte:head>
-	<title>TerraSketch</title>
+	<title>TerrasEdit</title>
 </svelte:head>
 
 

@@ -40,7 +40,7 @@ let mapMoveTimeout: number | null = null;
 export let vectorLayers: { [key: string]: VectorLayer } = {};
 export let activeLayerId: string | null = null;
 
-export const attributionText = writable("TerraSketch");
+export const attributionText = writable("TerrasEdit");
 
 // Define styles for features
 const selectedFeatureStyle = new Style({

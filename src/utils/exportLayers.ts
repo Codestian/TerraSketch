@@ -224,7 +224,7 @@ export function createSchematic(
   // Create a link to download the Blob as a .schem file
   const link = document.createElement("a");
   link.href = URL.createObjectURL(blob);
-  link.download = "terrasketch.schem";
+  link.download = "TerrasEdit.schem";
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);

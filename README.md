@@ -1,10 +1,10 @@
 <div align="center">
 
-# TerraSketch 🗺️⛏️
+# TerrasEdit 🗺️⛏️
 
 ## Create and export outlines for the BuildTheEarth project
 
-## [**🌍 Start Using TerraSketch Now!**](https://app.terrasketch.codestian.com/) 
+## [**🌍 Start Using TerrasEdit Now!**](https://app.TerrasEdit.codestian.com/) 
 
 ## Setup
 
@@ -29,7 +29,7 @@
 
 ### Supported map tiles
 
-The following regions support loading satellite map tiles onto TerraSketch. You can directly trace the outlines over. For other regions, use Polygon Creator alongside Google Maps. 
+The following regions support loading satellite map tiles onto TerrasEdit. You can directly trace the outlines over. For other regions, use Polygon Creator alongside Google Maps. 
 
  - Singapore 
  - Hong Kong
@@ -39,7 +39,7 @@ The following regions support loading satellite map tiles onto TerraSketch. You 
 
 ## Why was it made?
 
-TerraSketch was created to semi automate the building process of the Minecraft BuildTheEarth project, by allowing builders to draw outlines that span huge areas. 
+TerrasEdit was created to semi automate the building process of the Minecraft BuildTheEarth project, by allowing builders to draw outlines that span huge areas. 
 
 This saves a lot of time and allows builders to focus more on detailing their builds than manually referencing map sources to draw the outlines, which can take hours. This also means non minecrafters could also contribute by helping to outline from a top down perspective. 
 
