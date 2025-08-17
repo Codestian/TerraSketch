@@ -109,6 +109,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
+    background-color: rgba(255, 255, 255, 0.05);
     transition: background-color 0.2s ease, width 0.3s ease;
 
     &:hover {
@@ -133,7 +134,7 @@
     display: flex;
     flex-direction: column;
     flex: 1;
-    padding: 8px 8px 8px 0px;
+    padding: 8px;
     height: 100%;
     width: 320px;
     transition: width 0.3s ease-in-out, opacity 0.3s ease-in-out;
@@ -141,7 +142,7 @@
     &.hidden {
       width: 0;
       opacity: 0;
-      padding: 0;
+      padding: 8px 0px;
       overflow: hidden;
     }
 

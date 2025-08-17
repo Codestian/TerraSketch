@@ -50,6 +50,70 @@
     showModal = !showModal;
   }
 
+  // New state for delete confirmation
+  let showDeleteConfirm = false;
+
+  // New state for import confirmation and progress
+  let showImportConfirm = false;
+  let showImportProgress = false;
+  let pendingImportFile: File | null = null;
+  let importErrorMessage: string | null = null;
+
+  // Default values for import options
+  let blockName: string = "diamond_block";
+  let elevationStartInput: string = "0";
+  let elevationEndInput: string = "0";
+  let elevationInput: string = "0";
+
+  // Consider files larger than 5MB as big
+  const LARGE_FILE_BYTES = 5 * 1024 * 1024;
+
+  function openImportConfirm(file: File) {
+    pendingImportFile = file;
+    showImportConfirm = true;
+  }
+
+  function closeImportConfirm() {
+    showImportConfirm = false;
+    pendingImportFile = null;
+  }
+
+  async function confirmImport() {
+    if (!pendingImportFile) return;
+    showImportConfirm = false;
+
+    if (pendingImportFile.size > LARGE_FILE_BYTES) {
+      showImportProgress = true;
+    }
+
+    try {
+      const elevationStart = parseFloat(elevationStartInput) || 0;
+      const elevationEnd = parseFloat(elevationEndInput) || 0;
+      const elevation = parseFloat(elevationInput) || 0;
+
+      await importGeoJSON(pendingImportFile, {
+        block: blockName || "diamond_block",
+        elevationStart,
+        elevationEnd,
+        elevation,
+      });
+      const newLayer = getMap()
+        .getLayers()
+        .getArray()
+        .slice(-1)[0] as VectorLayer;
+      const newLayerId = newLayer.get("id") as string;
+
+      layers.push({ id: newLayerId, name: pendingImportFile.name, visible: true });
+      setActiveLayer(newLayerId);
+      selectedLayerId = newLayerId;
+    } catch (error: any) {
+      importErrorMessage = `Error importing GeoJSON file: ${error}`;
+    } finally {
+      showImportProgress = false;
+      pendingImportFile = null;
+    }
+  }
+
   onMount(() => {
     retrieveAllVectorLayers()
       .then((listOfLayers) => {
@@ -101,20 +165,58 @@
 
   // Function to delete the selected layer
   function deleteLayer() {
-    if (
-      confirm(
-        "Are you sure you want to delete this layer? This action cannot be reversed!",
-      )
-    ) {
-      if (selectedLayerId) {
-        deleteVectorLayerById(selectedLayerId).then(() => {
-          removeVectorLayer(selectedLayerId!);
-          layers = layers.filter((layer) => layer.id !== selectedLayerId);
-          selectedLayerId = null; // Clear the selection
-        });
+    if (selectedLayerId) {
+      const currentIndex = layers.findIndex(layer => layer.id === selectedLayerId);
+      
+      deleteVectorLayerById(selectedLayerId).then(() => {
+        removeVectorLayer(selectedLayerId!);
+        layers = layers.filter((layer) => layer.id !== selectedLayerId);
+        
+        // Auto-select next layer or no layer if none left
+        if (layers.length > 0) {
+          // If we deleted the last layer, select the new last layer
+          // Otherwise, select the next layer in the list
+          const nextIndex = Math.min(currentIndex, layers.length - 1);
+          selectedLayerId = layers[nextIndex].id;
+          setActiveLayer(selectedLayerId);
+        } else {
+          // No layers left, clear selection
+          selectedLayerId = null;
+        }
+        
+        showDeleteConfirm = false; // Hide confirmation after deletion
+      });
+    }
+  }
+
+  // Function to show delete confirmation
+  function showDeleteConfirmation() {
+    showDeleteConfirm = true;
+  }
+
+  // Function to cancel delete confirmation
+  function cancelDelete() {
+    showDeleteConfirm = false;
+  }
+
+  // Function to handle clicks outside the confirmation popup
+  function handleClickOutside(event: MouseEvent) {
+    if (showDeleteConfirm) {
+      const target = event.target as HTMLElement;
+      if (!target.closest('.delete-container')) {
+        showDeleteConfirm = false;
       }
     }
   }
+
+  // Add click event listener when component mounts
+  onMount(() => {
+    document.addEventListener('click', handleClickOutside);
+    
+    return () => {
+      document.removeEventListener('click', handleClickOutside);
+    };
+  });
 
   // Function to select a layer by its unique ID
   function selectLayer(layerId: string) {
@@ -144,20 +246,8 @@
     const file = input.files?.[0];
 
     if (file) {
-      try {
-        await importGeoJSON(file);
-        const newLayer = getMap()
-          .getLayers()
-          .getArray()
-          .slice(-1)[0] as VectorLayer;
-        const newLayerId = newLayer.get("id") as string;
-
-        layers.push({ id: newLayerId, name: file.name, visible: true });
-        setActiveLayer(newLayerId);
-        selectedLayerId = newLayerId;
-      } catch (error) {
-        alert("Error importing GeoJSON file: " + error);
-      }
+      // Open confirmation modal instead of importing immediately
+      openImportConfirm(file);
     }
 
     // Clear the file input so the same file can be selected again
@@ -168,12 +258,18 @@
     if (selectedLayerId) {
       const features = getFeaturesOfSelectedLayer(selectedLayerId);
       const geojsonFormat = new GeoJSON();
-      const geojson = geojsonFormat.writeFeatures(features!, {
+      const obj: any = geojsonFormat.writeFeaturesObject(features!, {
         featureProjection: "EPSG:3857",
         dataProjection: "EPSG:4326",
       });
-
-      saveGeoJsonFile(geojson);
+      if (obj && Array.isArray(obj.features)) {
+        for (const f of obj.features) {
+          if (f && f.properties == null) {
+            f.properties = {};
+          }
+        }
+      }
+      saveGeoJsonFile(JSON.stringify(obj));
     } else {
       alert("No layer selected.");
     }
@@ -360,8 +456,8 @@
       style="display: none;"
     />
   </div>
-  <div class="list">
-    {#each layers as layer}
+  <div class="list {showDeleteConfirm ? 'dimmed' : ''}">
+    {#each layers as layer (layer.id)}
       <div
         class="layer-item {selectedLayerId === layer.id ? 'selected' : ''}"
         on:click={() => selectLayer(layer.id)}
@@ -387,9 +483,24 @@
   </div>
   <div class="controls">
     <button on:click={addLayer}><i class="fas fa-plus"></i></button>
-    <button on:click={deleteLayer} disabled={!selectedLayerId}
-      ><i class="fas fa-trash-can"></i></button
-    >
+    
+    <div class="delete-container">
+      <div class="delete-confirmation {showDeleteConfirm ? 'show' : ''}">
+        <span class="confirm-text">Confirm delete layer?</span>
+        <div class="confirm-buttons">
+          <button class="confirm-yes" on:click={deleteLayer}>Yes</button>
+          <button class="confirm-no" on:click={cancelDelete}>No</button>
+        </div>
+      </div>
+      
+      <button 
+        on:click={showDeleteConfirmation} 
+        disabled={!selectedLayerId}
+        class="delete-btn"
+      >
+        <i class="fas fa-trash-can"></i>
+      </button>
+    </div>
   </div>
 </div>
 
@@ -484,6 +595,61 @@
   </div>
 </Modal>
 
+<Modal title="Import GeoJSON" show={showImportConfirm} on:close={closeImportConfirm}>
+  <div class="import-confirm">
+    <p>Do you want to import the file:</p>
+    <p class="filename">{pendingImportFile?.name}</p>
+    <p class="filesize">
+      Size: {pendingImportFile ? (pendingImportFile.size / (1024 * 1024)).toFixed(2) : '0'} MB
+    </p>
+    <div class="field">
+      <label>Default block</label>
+      <input type="text" bind:value={blockName} />
+    </div>
+    <div class="grid">
+      <div class="field">
+        <label>Line start elevation</label>
+        <input type="number" bind:value={elevationStartInput} />
+      </div>
+      <div class="field">
+        <label>Line end elevation</label>
+        <input type="number" bind:value={elevationEndInput} />
+      </div>
+      <div class="field">
+        <label>Other shapes elevation</label>
+        <input type="number" bind:value={elevationInput} />
+      </div>
+    </div>
+    {#if pendingImportFile && pendingImportFile.size > LARGE_FILE_BYTES}
+      <p class="warning">This is a large file. Import may take a while.</p>
+    {/if}
+    <div class="actions">
+      <button class="cancel" on:click={closeImportConfirm}>Cancel</button>
+      <button class="confirm" on:click={confirmImport}>Import</button>
+    </div>
+  </div>
+  </Modal>
+
+<Modal title="Importing..." show={showImportProgress} on:close={() => {}}>
+  <div class="import-progress">
+    <div class="progress-bar">
+      <div class="progress-bar-fill"></div>
+    </div>
+    <p>Please wait while the file is being imported.</p>
+  </div>
+</Modal>
+
+{#if importErrorMessage}
+  <Modal title="Import Error" show={true} on:close={() => (importErrorMessage = null)}>
+    <div class="import-error">
+      <p>{importErrorMessage}</p>
+      <div class="actions">
+        <button class="confirm" on:click={() => (importErrorMessage = null)}>Close</button>
+      </div>
+    </div>
+  </Modal>
+{/if}
+
 <style lang="scss">
   .layers-manager {
     width: 100%;
@@ -491,6 +657,7 @@
     padding: 8px;
     display: flex;
     flex-direction: column;
+    position: relative;
 
     .row {
       width: 100%;
@@ -502,14 +669,22 @@
     }
 
     .list {
-      overflow-y: auto;
+      width: 100%;
+      overflow-y: scroll;
       scrollbar-color: rgba(255, 255, 255, 0.4) rgba(255, 255, 255, 0.1);
       scrollbar-width: thin;
       height: 100%;
+      position: relative;
+
+      &.dimmed {
+        opacity: 0.4;
+        pointer-events: none;
+      }
 
       .layer-item {
         padding: 4px;
-        margin-bottom: 4px;
+        margin-bottom: 2px;
+        margin-right: 8px;
         background: rgba(255, 255, 255, 0.1);
         cursor: pointer;
         display: flex;
@@ -593,6 +768,111 @@
         &:disabled {
           cursor: not-allowed;
           opacity: 0.5;
+        }
+      }
+
+      .delete-btn {
+        position: relative;
+        width: 32px;
+        height: 32px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: white;
+        background: rgba(255, 255, 255, 0.1);
+        border: 1px solid rgba(255, 255, 255, 0.05);
+        cursor: pointer;
+        font-weight: bold;
+        text-transform: uppercase;
+
+        i {
+          font-size: 0.8rem;
+        }
+
+        &:disabled {
+          cursor: not-allowed;
+          opacity: 0.5;
+        }
+      }
+
+      .delete-container {
+        position: relative;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .delete-confirmation {
+        position: absolute;
+        bottom: calc(100% + 8px);
+        right: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        padding: 12px;
+        background: rgb(41, 41, 41);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        color: white;
+        z-index: 1000;
+        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+        opacity: 0;
+        transform: scale(0.3);
+        transform-origin: bottom right;
+        transition: all 0.1s cubic-bezier(0.4, 0, 0.2, 1);
+        pointer-events: none;
+        visibility: hidden;
+
+        &.show {
+          opacity: 1;
+          transform: scale(1);
+          pointer-events: auto;
+          visibility: visible;
+        }
+      }
+
+      .delete-confirmation.show {
+        opacity: 1;
+        transform: translateY(0);
+        pointer-events: auto;
+      }
+
+      .confirm-text {
+        font-weight: bold;
+        font-size: 0.8rem;
+        white-space: nowrap;
+      }
+
+      .confirm-buttons {
+        display: flex;
+        justify-content: flex-end;
+        gap: 8px;
+
+        button {
+          width: auto;
+          height: auto;
+          padding: 6px 12px;
+          background-color: rgba(255, 255, 255, 0.2);
+          border: 1px solid rgba(255, 255, 255, 0.1);
+          color: white;
+          font-weight: bold;
+          text-transform: uppercase;
+          cursor: pointer;
+          transition: background 0.3s;
+          font-size: 0.7rem;
+
+          &:hover {
+            background: rgba(255, 255, 255, 0.1);
+          }
+
+          &.confirm-yes {
+            background-color: rgb(201, 13, 13);
+            border-color: rgb(255, 0, 0);
+          }
+
+          &.confirm-no {
+            background-color: rgba(255, 255, 255, 0.1);
+            border-color: rgba(255, 255, 255, 0.1);
+          }
         }
       }
     }
@@ -679,4 +959,120 @@
       text-transform: uppercase;
     }
   }
+
+  /* Import modal inputs */
+  .import-confirm {
+    .field {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      margin-top: 6px;
+    }
+    .grid {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin-top: 6px;
+    }
+    input[type="text"], input[type="number"] {
+      padding: 6px;
+      color: white;
+      background: rgba(0, 0, 0, 0.4);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+    }
+  }
+
+  .import-confirm {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+
+    .filename {
+      font-weight: bold;
+      word-break: break-all;
+    }
+
+    .filesize {
+      opacity: 0.8;
+      font-size: 0.8rem;
+    }
+
+    .warning {
+      color: orange;
+      font-size: 0.8rem;
+    }
+
+    .actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+
+      button {
+        cursor: pointer;
+        padding: 8px 16px;
+        background-color: green;
+        border-top: 3px solid rgba(255, 255, 255, 0.1);
+        border-left: 3px solid rgba(255, 255, 255, 0.1);
+        border-bottom: 3px solid rgba(0, 0, 0, 0.3);
+        border-right: 3px solid rgba(0, 0, 0, 0.3);
+        font-size: 0.6rem;
+        font-weight: bold;
+        color: white;
+        letter-spacing: 2px;
+        text-transform: uppercase;
+      }
+
+      .cancel {
+        background-color: rgba(255, 255, 255, 0.2);
+      }
+    }
+  }
+
+  .import-progress {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+
+    .progress-bar {
+      position: relative;
+      width: 100%;
+      height: 10px;
+      background: rgba(255, 255, 255, 0.1);
+      overflow: hidden;
+      border: 1px solid rgba(255, 255, 255, 0.2);
+
+      .progress-bar-fill {
+        position: absolute;
+        left: -40%;
+        width: 40%;
+        height: 100%;
+        background: green;
+        animation: progress-indeterminate 1s linear infinite;
+      }
+    }
+
+    @keyframes progress-indeterminate {
+      0% { left: -40%; }
+      100% { left: 100%; }
+    }
+  }
+
+  .import-error {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+
+    .actions {
+      display: flex;
+      justify-content: flex-end;
+
+      .confirm {
+        background: green;
+        color: white;
+      }
+    }
+  }
+
+
+
 </style>
