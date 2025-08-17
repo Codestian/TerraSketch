@@ -119,10 +119,9 @@
         gap: 8px;
 
         .label-text {
-          font-size: 0.8rem;
+          font-size: 0.7rem;
           height: 32px;
-          color: rgba(255, 255, 255, 0.8);
-          font-weight: bold;
+          color: white;
           padding: 4px 8px;
           background: rgba(255, 255, 255, 0.05);
           border: 1px solid rgba(255, 255, 255, 0.1);

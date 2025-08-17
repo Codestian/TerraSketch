@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onMount, onDestroy } from "svelte";
   import Button from "../common/Button.svelte";
   import FirstWindow from "./windows/firstwindow/FirstWindow.svelte";
   import SecondWindow from "./windows/secondwindow/SecondWindow.svelte";
@@ -23,13 +24,49 @@
   function toggleSidebar() {
     isHidden = !isHidden;
   }
+
+  function handleToggleKeydown(event: KeyboardEvent) {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      toggleSidebar();
+    }
+  }
+
+  function applyResponsiveVisibility(width: number) {
+    isHidden = width < 768;
+  }
+
+  let handleResize: () => void;
+
+  onMount(() => {
+    // Set initial state based on current viewport width
+    applyResponsiveVisibility(window.innerWidth);
+    // Update state on resize
+    handleResize = () => applyResponsiveVisibility(window.innerWidth);
+    window.addEventListener("resize", handleResize);
+  });
+
+  onDestroy(() => {
+    if (handleResize) {
+      window.removeEventListener("resize", handleResize);
+    }
+  });
 </script>
 
-<aside class="sidelayout">
-  <div class="resize-handle" on:click={toggleSidebar}>
+<aside class="sidelayout" class:collapsed={isHidden}>
+  <div
+    class="toggle-handle"
+    role="button"
+    tabindex="0"
+    aria-label="Toggle sidebar"
+    aria-expanded={!isHidden}
+    aria-controls="sidebar-content"
+    on:click={toggleSidebar}
+    on:keydown={handleToggleKeydown}
+  >
     <span></span>
   </div>
-  <div class="content" class:hidden={isHidden}>
+  <div id="sidebar-content" class="content" class:hidden={isHidden}>
     <div class="search-container">
       <input
         id="search"
@@ -41,8 +78,8 @@
         onClick={moveToCoordinates}
         iconClass="fas fa-search"
         label=""
-        width="28px"
-        height="28px"
+        width="36px"
+        height="36px"
       />
     </div>
     <div class="windows" id="windowsContainer">
@@ -62,16 +99,17 @@
     box-sizing: border-box;
     display: flex;
     height: 100%;
+    z-index: 10;
   }
 
-  .resize-handle {
+  .toggle-handle {
     width: 18px;
     height: 100%;
     cursor: pointer;
     display: flex;
     align-items: center;
     justify-content: center;
-    transition: background-color 0.2s ease;
+    transition: background-color 0.2s ease, width 0.3s ease;
 
     &:hover {
       background-color: rgba(255, 255, 255, 0.1);
@@ -82,6 +120,12 @@
       width: 2px;
       background: white;
       border-radius: 32px;
+    }
+  }
+
+  .sidelayout.collapsed {
+    .toggle-handle {
+      width: 26px;
     }
   }
 
@@ -103,9 +147,9 @@
 
     .search-container {
       display: flex;
-      margin-bottom: 6px;
+      margin-bottom: 8px;
       width: 100%;
-      height: 28px;
+      height: 36px;
 
       #search {
         border: none;
