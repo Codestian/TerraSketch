@@ -5,8 +5,18 @@
     let topInput: string = "";
     let bottomInput: string = "";
     let isConvertingLatLng: boolean = true;
+    let hasError: boolean = false;
+
+    $: hasError = bottomInput.startsWith('Error:');
+    
+    // Reactive statement to automatically convert when input changes
+    $: if (topInput.trim()) {
+        handleConvert();
+    } else {
+        bottomInput = "";
+    }
   
-    function handleConvertClick() {
+    function handleConvert() {
       console.log('Converting with isConvertingLatLng:', isConvertingLatLng);
       if (isConvertingLatLng) {
         // Validate the input format for LatLng
@@ -23,7 +33,7 @@
           // Update the second input field with the converted coordinates
           bottomInput = `${coords[0]}, y, ${coords[1]}`;
         } else {
-          alert('Invalid LatLng format. Please use "latitude, longitude".');
+          bottomInput = 'Error: Invalid LatLng format. Please use "latitude, longitude".';
         }
       } else {
         // Validate the input format for Minecraft coordinates
@@ -40,7 +50,7 @@
           const coords = toGeo(x, z);
           bottomInput = `${coords[0]}, ${coords[1]}`;
         } else {
-          alert('Invalid Minecraft format. Please use "x, y, z".');
+          bottomInput = 'Error: Invalid Minecraft format. Please use "x, y, z".';
         }
       }
     }
@@ -69,32 +79,28 @@
   </script>
   
   <div class="converter">
+    <div class="row">
+      <span class="label-text">{isConvertingLatLng ? 'LatLng' : 'Minecraft'}</span>
+      <WindowButton iconClass="fas fa-right-left" onClick={handleSwapClick} square={true} />
+      <span class="label-text">{isConvertingLatLng ? 'Minecraft' : 'LatLng'}</span>
+    </div>
+    
     <div class="input">
-      <input
-        type="text"
+      <textarea
         placeholder={isConvertingLatLng ? "LatLng coordinates..." : "Minecraft coordinates..."}
         bind:value={topInput}
-      />
-      <button on:click={handleConvertClick}>
-        <i class="fas fa-arrow-right"></i>
-      </button>
-    </div>
-  
-    <div class="convert-btn">
-      <WindowButton iconClass="fas fa-right-left" onClick={handleSwapClick} />
+      ></textarea>
     </div>
   
     <div class="input">
-      <input
+      <textarea
         id="convertedInput"
-        type="text"
+        class:error={hasError}
         placeholder={isConvertingLatLng ? "Minecraft coordinates..." : "LatLng coordinates..."}
         bind:value={bottomInput}
         disabled
-      />
-      <button on:click={copyConvertedResult}>
-        <i class="fa-regular fa-copy"></i>
-      </button>
+      ></textarea>
+      <WindowButton iconClass="fa-regular fa-copy" onClick={copyConvertedResult} square={true} />
     </div>
   </div>
   
@@ -105,39 +111,65 @@
       height: 100%;
       padding: 8px;
   
-      .input {
-        height: 36px;
-        width: 100%;
+      .row {
         display: flex;
-  
-        button {
-          width: 36px;
-          height: 36px;
-          border: 1px solid rgba(255, 255, 255, 0.1);
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 8px;
+        gap: 8px;
+
+        .label-text {
+          font-size: 0.7rem;
+          height: 32px;
+          color: white;
+          padding: 4px 8px;
           background: rgba(255, 255, 255, 0.05);
-          color: white;
-        }
-  
-        input {
-          width: 100%;
-          padding: 8px;
-          background: rgba(255, 255, 255, 0.1);
-          border: none;
-          color: white;
-          font-size: 0.8rem;
-  
-          &:disabled {
-            opacity: 0.6;
-          }
+          border: 1px solid rgba(255, 255, 255, 0.1);
+          flex: 1;
+          text-align: center;
+          display: flex;
+          letter-spacing: 1px;
+          align-items: center;
+          justify-content: center;
+          user-select: none;
         }
       }
   
-      .convert-btn {
+      .input {
+        flex: 1;
         width: 100%;
         display: flex;
-        justify-content: center;
-        align-items: center;
-        flex: 1;
+  
+        textarea {
+          width: 100%;
+          padding: 12px;
+          background: rgba(255, 255, 255, 0.05);
+          border: 1px solid transparent;
+          color: white;
+          font-size: 0.9rem;
+          resize: none;
+
+          &.error {
+            color: #ff6b6b;
+            background: rgba(255, 107, 107, 0.1);
+            border: 1px solid rgba(255, 107, 107, 0.3);
+          }
+
+          &:focus {
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            outline: none;
+          }
+  
+        }
+      }
+
+      .input:nth-of-type(3) {
+        background: rgba(0, 0, 0, 0.1);
+
+        textarea {
+          background: transparent;
+          user-select: none;
+        }
       }
     }
   </style>

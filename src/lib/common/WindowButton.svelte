@@ -5,18 +5,21 @@
     export let iconClass: string;
     export let label: string = ''; // Default label
     export let width: string = '32px'; // Default width
-    export let minHeight: string = '32px'; // Default min-height
     export let onClick: () => void = () => {}; // Default onClick handler
     export let flexGrow: boolean = false; // Prop for flex grow
+    export let square: boolean = false; // Prop for making button square
 </script>
 
 <button 
     class="btn" 
-    style="width: {flexGrow ? 'auto' : width}; flex-grow: {flexGrow ? 1 : 0};" 
+    class:square={square}
+    style="width: {flexGrow ? 'auto' : (square ? '32px' : width)}; flex-grow: {flexGrow ? 1 : 0};" 
     on:click={onClick}
 >
     <i class={iconClass}></i>
-    {label}
+    {#if !square}
+        {label}
+    {/if}
 </button>
 
 <style lang="scss">
@@ -41,6 +44,16 @@
 
         &:hover {
             background-color: rgba(255, 255, 255, 0.2);
+        }
+
+        &.square {
+            width: 32px;
+            height: 32px;
+            padding: 0;
+
+            i {
+                padding-right: 0;
+            }
         }
     }
 </style>

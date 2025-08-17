@@ -10,6 +10,7 @@ import { GeoJSON } from "ol/format"; // Import GeoJSON format for handling GeoJS
 import { Polygon } from "ol/geom";
 import { defaults as defaultInteractions, DragRotate } from "ol/interaction";
 import DoubleClickZoom from "ol/interaction/DoubleClickZoom";
+import PointerInteraction from "ol/interaction/Pointer";
 import Draw, { createBox } from "ol/interaction/Draw";
 import Modify from "ol/interaction/Modify";
 import Select from "ol/interaction/Select";
@@ -24,6 +25,8 @@ import VectorSource from "ol/source/Vector";
 import { Fill, Stroke, Style } from "ol/style";
 import { writable } from "svelte/store";
 import { MapTileLayer, mapTileLayers } from "./mapTileUtils";
+import { rotateSelectedFeatures } from "./transformationUtils";
+
 
 // Create a Svelte store to keep track of the selected feature type
 export const selectedFeature = writable<Feature | null>(null);
@@ -34,13 +37,14 @@ let selectInteraction: Select | null = null;
 let translateInteraction: Translate | null = null;
 let modifyInteraction: Modify | null = null;
 let doubleClickZoomInteraction: DoubleClickZoom | null = null;
+let rotatePointerInteraction: PointerInteraction | null = null;
 let mapMoveTimeout: number | null = null;
 
 // Manage multiple vector layers using a plain object
 export let vectorLayers: { [key: string]: VectorLayer } = {};
 export let activeLayerId: string | null = null;
 
-export const attributionText = writable("TerraSketch");
+export const attributionText = writable("TerrasEdit");
 
 // Define styles for features
 const selectedFeatureStyle = new Style({
@@ -96,6 +100,102 @@ export function getMap(): OLMap {
 
 export function getSelectInteraction() {
   return selectInteraction;
+}
+
+// Compute midpoint of the union bbox of all selected features
+function computeSelectionCenter(): [number, number] | null {
+  const select = getSelectInteraction();
+  if (!select) return null;
+
+  const selected = select.getFeatures();
+  if (selected.getLength() === 0) return null;
+
+  let minX = Infinity,
+    minY = Infinity,
+    maxX = -Infinity,
+    maxY = -Infinity;
+
+  selected.forEach((feature: Feature) => {
+    const geom = feature.getGeometry();
+    if (geom) {
+      const extent = geom.getExtent();
+      minX = Math.min(minX, extent[0]);
+      minY = Math.min(minY, extent[1]);
+      maxX = Math.max(maxX, extent[2]);
+      maxY = Math.max(maxY, extent[3]);
+    }
+  });
+
+  return [(minX + maxX) / 2, (minY + maxY) / 2];
+}
+
+function ensureRotateInteractionOnTop() {
+  if (rotatePointerInteraction) {
+    map.removeInteraction(rotatePointerInteraction);
+    map.addInteraction(rotatePointerInteraction);
+  }
+}
+
+function enableAltDragFreeRotate() {
+  if (rotatePointerInteraction) {
+    map.removeInteraction(rotatePointerInteraction);
+    rotatePointerInteraction = null;
+  }
+
+  let isRotating = false;
+  let center: [number, number] | null = null;
+  let lastAngleRad = 0;
+
+  rotatePointerInteraction = new PointerInteraction({
+    handleDownEvent: (evt) => {
+      const oe = evt.originalEvent as MouseEvent;
+      const select = getSelectInteraction();
+      if (!select || select.getFeatures().getLength() === 0) return false;
+      if (!oe.altKey || oe.button !== 0) return false;
+
+      center = computeSelectionCenter();
+      if (!center) return false;
+
+      const dx = evt.coordinate[0] - center[0];
+      const dy = evt.coordinate[1] - center[1];
+      lastAngleRad = Math.atan2(dy, dx);
+      isRotating = true;
+      return true; // start drag sequence
+    },
+
+    handleDragEvent: (evt) => {
+      if (!isRotating || !center) return;
+
+      const oe = evt.originalEvent as MouseEvent;
+      if (!oe.altKey) {
+        isRotating = false;
+        center = null;
+        return;
+      }
+
+      const dx = evt.coordinate[0] - center[0];
+      const dy = evt.coordinate[1] - center[1];
+      const angleRad = Math.atan2(dy, dx);
+      
+      let deltaRad = angleRad - lastAngleRad;
+      // Normalize to [-PI, PI] to prevent jumps across the wrap boundary
+      if (deltaRad > Math.PI) deltaRad -= 2 * Math.PI;
+      if (deltaRad < -Math.PI) deltaRad += 2 * Math.PI;
+      const deltaDeg = (deltaRad * 180) / Math.PI;
+
+      rotateSelectedFeatures(deltaDeg, getSelectInteraction());
+      lastAngleRad = angleRad;
+    },
+
+    handleUpEvent: () => {
+      isRotating = false;
+      center = null;
+      return false;
+    },
+  });
+
+  map.addInteraction(rotatePointerInteraction);
+  ensureRotateInteractionOnTop();
 }
 
 // Function to create a new vector layer with a unique ID and a given name
@@ -419,14 +519,8 @@ export function initializeMap(target: HTMLElement) {
       (interaction) => interaction instanceof DoubleClickZoom
     ) as DoubleClickZoom;
 
-  // Initialize the coordinates display
-  updateMapCenterCoordinates();
-
-  // Update coordinates when the map view changes
-  map.getView().on("change:center", updateMapCenterCoordinates);
-  map.getView().on("change:resolution", updateMapCenterCoordinates);
-
   enableFeatureSelection();
+  enableAltDragFreeRotate();
   addRightClickListener(map);
 
   // // Define the extent of the image in map coordinates (in this case, EPSG:3857)
@@ -444,22 +538,6 @@ export function initializeMap(target: HTMLElement) {
   // });
 
   // map.addLayer(imageLayer);
-}
-
-function updateMapCenterCoordinates() {
-  const view = map.getView();
-  const center = view.getCenter();
-  if (center) {
-    const [lon, lat] = toLonLat(center); // Convert from map projection to latitude and longitude
-    updateCenterCoordinatesDisplay(lat, lon);
-  }
-}
-
-function updateCenterCoordinatesDisplay(lat: number, lon: number) {
-  const coordinatesDiv = document.getElementById("coordinates");
-  if (coordinatesDiv) {
-    coordinatesDiv.textContent = `Latitude: ${lat.toFixed(5)}, Longitude: ${lon.toFixed(5)}`;
-  }
 }
 
 // Change the map's tile layer
@@ -596,6 +674,7 @@ function enableFeatureSelection() {
   );
 
   map.addInteraction(selectInteraction);
+  ensureRotateInteractionOnTop();
 }
 
 // Enables move mode
@@ -607,8 +686,14 @@ export function enableMoveMode() {
   if (!translateInteraction && selectInteraction) {
     translateInteraction = new Translate({
       features: selectInteraction.getFeatures(),
+      // Do not translate while Alt is held (reserved for rotation)
+      condition: (evt) => {
+        const oe = evt.originalEvent as MouseEvent;
+        return !oe.altKey;
+      },
     });
     map.addInteraction(translateInteraction);
+    ensureRotateInteractionOnTop();
   }
 }
 
@@ -623,6 +708,7 @@ export function enableModifyMode() {
       features: selectInteraction.getFeatures(),
     });
     map.addInteraction(modifyInteraction);
+    ensureRotateInteractionOnTop();
   }
 }
 
@@ -650,69 +736,15 @@ export function areFeaturesSelected(): boolean {
   );
 }
 
-// Rotates selected features
-export function rotateSelectedFeatures(degrees: number) {
-  if (!selectInteraction) return;
 
-  const selectedFeatures = selectInteraction.getFeatures();
-  const radians = (degrees * Math.PI) / 180;
 
-  selectedFeatures.forEach((feature) => {
-    const geometry = feature.getGeometry();
-    if (geometry) {
-      const extent = geometry.getExtent();
-      const center = [(extent[0] + extent[2]) / 2, (extent[1] + extent[3]) / 2];
-      geometry.rotate(radians, center);
-      feature.setGeometry(geometry);
-    }
-  });
-}
 
-// Flips selected features vertically
-export function flipSelectedFeaturesVertically() {
-  if (!selectInteraction) return;
 
-  const selectedFeatures = selectInteraction.getFeatures();
 
-  selectedFeatures.forEach((feature) => {
-    const geometry = feature.getGeometry();
-    if (geometry) {
-      const extent = geometry.getExtent();
-      const centerY = (extent[1] + extent[3]) / 2;
 
-      geometry.applyTransform((input, output = [], dimension = 2) => {
-        for (let i = 0; i < input.length; i += dimension) {
-          output[i] = input[i];
-          output[i + 1] = 2 * centerY - input[i + 1];
-        }
-        return output;
-      });
-    }
-  });
-}
 
-// Flips selected features horizontally
-export function flipSelectedFeaturesHorizontally() {
-  if (!selectInteraction) return;
 
-  const selectedFeatures = selectInteraction.getFeatures();
 
-  selectedFeatures.forEach((feature) => {
-    const geometry = feature.getGeometry();
-    if (geometry) {
-      const extent = geometry.getExtent();
-      const centerX = (extent[0] + extent[2]) / 2;
-
-      geometry.applyTransform((input, output = [], dimension = 2) => {
-        for (let i = 0; i < input.length; i += dimension) {
-          output[i] = 2 * centerX - input[i];
-          output[i + 1] = input[i + 1];
-        }
-        return output;
-      });
-    }
-  });
-}
 
 // Deletes selected features
 export function deleteSelectedFeatures() {

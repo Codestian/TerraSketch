@@ -1,9 +1,10 @@
-import { getMap, getSelectInteraction, deleteSelectedFeatures, copySelectedFeatures, pasteCopiedFeatures } from './mapUtils';
+import { deleteSelectedFeatures, copySelectedFeatures, pasteCopiedFeatures, getSelectInteraction } from './mapUtils';
+import { rotateSelectedFeatures, flipSelectedFeaturesVerticallyUp, flipSelectedFeaturesVerticallyDown, flipSelectedFeaturesHorizontallyLeft, flipSelectedFeaturesHorizontallyRight } from './transformationUtils';
 
 function handleKeyDown(event: KeyboardEvent) {
     // Check if the focused element is inside the table in Features.svelte
     const focusedElement = document.activeElement as HTMLElement;
-    if (focusedElement.closest('table') || focusedElement.closest('input')) {
+    if (focusedElement.closest('table') || focusedElement.closest('input') || focusedElement.closest('textarea')) {
         // If the focused element is within a table, do not proceed with map-related operations
         return;
     }
@@ -22,6 +23,42 @@ function handleKeyDown(event: KeyboardEvent) {
     if (event.key === 'v' && (event.ctrlKey || event.metaKey)) {
         event.preventDefault(); // Prevent the default paste action
         pasteCopiedFeatures();
+    }
+
+    // Handle Alt+Q (Rotate 90° clockwise/right)
+    if (event.key === 'q' && event.altKey) {
+        event.preventDefault();
+        rotateSelectedFeatures(90, getSelectInteraction()); // Negative for clockwise (right)
+    }
+
+    // Handle Alt+E (Rotate 90° counterclockwise/left)
+    if (event.key === 'e' && event.altKey) {
+        event.preventDefault();
+        rotateSelectedFeatures(-90, getSelectInteraction()); // Positive for counterclockwise (left)
+    }
+
+    // Handle Alt+W (Flip vertically upward)
+    if (event.key === 'w' && event.altKey) {
+        event.preventDefault();
+        flipSelectedFeaturesVerticallyUp(getSelectInteraction());
+    }
+
+    // Handle Alt+S (Flip vertically downward)
+    if (event.key === 's' && event.altKey) {
+        event.preventDefault();
+        flipSelectedFeaturesVerticallyDown(getSelectInteraction());
+    }
+
+    // Handle Alt+A (Flip horizontally leftward)
+    if (event.key === 'a' && event.altKey) {
+        event.preventDefault();
+        flipSelectedFeaturesHorizontallyLeft(getSelectInteraction());
+    }
+
+    // Handle Alt+D (Flip horizontally rightward)
+    if (event.key === 'd' && event.altKey) {
+        event.preventDefault();
+        flipSelectedFeaturesHorizontallyRight(getSelectInteraction());
     }
 }
 

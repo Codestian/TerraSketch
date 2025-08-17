@@ -106,7 +106,7 @@
 
   function changeToBlank() {
     changeMapTileLayer(MapTileLayer.Blank);
-    attributionText.set("TerraSketch");
+    attributionText.set("TerrasEdit");
   }
 
   function changeToCustom(mapUrl: string) {
