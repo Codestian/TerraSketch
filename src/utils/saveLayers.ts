@@ -63,10 +63,19 @@ async function storeVectorLayer(
 
     const features: Feature[] = vectorSource.getFeatures();
     const geojsonFormat = new GeoJSON();
-    const geojson = geojsonFormat.writeFeatures(features, {
+    // Write as object so we can normalize null properties to {}
+    const geojsonObj: any = geojsonFormat.writeFeaturesObject(features, {
       featureProjection: "EPSG:3857",
       dataProjection: "EPSG:4326",
     });
+    if (geojsonObj && Array.isArray(geojsonObj.features)) {
+      for (const f of geojsonObj.features) {
+        if (f && (f as any).properties == null) {
+          (f as any).properties = {};
+        }
+      }
+    }
+    const geojson = JSON.stringify(geojsonObj);
 
     const data: VectorLayerData = {
       id: vectorLayer.get('id'),

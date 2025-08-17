@@ -1,6 +1,7 @@
 import { fromGeo } from "@bte-germany/terraconvert";
 import { default as Collection } from "ol/Collection";
 import { default as Feature } from "ol/Feature";
+import type { FeatureLike } from "ol/Feature";
 import OLMap from "ol/Map";
 import View from "ol/View";
 import { defaults as defaultControls } from "ol/control";
@@ -8,6 +9,7 @@ import { click } from "ol/events/condition";
 import type { Extent } from "ol/extent";
 import { GeoJSON } from "ol/format"; // Import GeoJSON format for handling GeoJSON data
 import { Polygon } from "ol/geom";
+import type Geometry from "ol/geom/Geometry";
 import { defaults as defaultInteractions, DragRotate } from "ol/interaction";
 import DoubleClickZoom from "ol/interaction/DoubleClickZoom";
 import PointerInteraction from "ol/interaction/Pointer";
@@ -26,10 +28,13 @@ import { Fill, Stroke, Style } from "ol/style";
 import { writable } from "svelte/store";
 import { MapTileLayer, mapTileLayers } from "./mapTileUtils";
 import { rotateSelectedFeatures } from "./transformationUtils";
+import { showContextMenu, hideContextMenu } from "./contextMenuStore";
+import { showFeatureContextMenu, hideFeatureContextMenu } from "./featureContextMenuStore";
 
 
 // Create a Svelte store to keep track of the selected feature type
 export const selectedFeature = writable<Feature | null>(null);
+export const hasSelectedFeatures = writable(false);
 
 export let map: OLMap;
 let drawInteraction: Draw | null = null;
@@ -289,8 +294,15 @@ export function getActiveLayer(): VectorLayer | null {
   return activeLayerId ? vectorLayers[activeLayerId] || null : null;
 }
 
+export interface ImportOptions {
+  block: string;
+  elevationStart: number;
+  elevationEnd: number;
+  elevation: number;
+}
+
 // Function to import a GeoJSON file and add it as a new layer
-export function importGeoJSON(file: File): Promise<void> {
+export function importGeoJSON(file: File, options: ImportOptions): Promise<void> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = (event) => {
@@ -300,32 +312,7 @@ export function importGeoJSON(file: File): Promise<void> {
         featureProjection: map.getView().getProjection(),
       });
 
-      // Prompt the user for elevation values
-      const blockInput = prompt(
-        "Enter the default block name used:",
-        "diamond_block"
-      );
-      const elevationStartInput = prompt(
-        "Enter the default starting elevation for lines:",
-        "0"
-      );
-      const elevationEndInput = prompt(
-        "Enter the default ending elevation for lines:",
-        "0"
-      );
-      const elevationInput = prompt(
-        "Enter the default elevation for other shapes:",
-        "0"
-      );
-
-      const block = blockInput !== null ? blockInput : "diamond_block";
-
-      const elevationStart =
-        elevationStartInput !== null ? parseFloat(elevationStartInput) : 0;
-      const elevationEnd =
-        elevationEndInput !== null ? parseFloat(elevationEndInput) : 0;
-      const elevation =
-        elevationInput !== null ? parseFloat(elevationInput) : 0;
+      const { block, elevationStart, elevationEnd, elevation } = options;
 
       // Loop through each feature and apply the corresponding elevation properties
       features.forEach((feature: Feature) => {
@@ -372,7 +359,6 @@ export function importGeoJSON(file: File): Promise<void> {
     };
 
     reader.onerror = (error) => {
-      alert("Error reading GeoJSON file: " + error);
       reject(error);
     };
 
@@ -380,81 +366,64 @@ export function importGeoJSON(file: File): Promise<void> {
   });
 }
 
-// Add a right-click listener to display coordinates with two buttons
+// Add a right-click listener to display either feature properties menu or coordinates menu
 function addRightClickListener(map: OLMap) {
-  const coordContainer = document.createElement("div");
-  coordContainer.style.position = "absolute";
-  coordContainer.style.zIndex = "1001";
-  coordContainer.style.background = "#fff";
-  coordContainer.style.padding = "8px 0";
-  coordContainer.style.boxShadow = "0 1px 4px rgba(0,0,0,0.2)";
-  coordContainer.style.display = "none";
-  coordContainer.style.flexDirection = "column";
-  coordContainer.style.alignItems = "flex-start";
-  document.body.appendChild(coordContainer);
-
-  // Create the first coordinate button
-  const coordButton1 = document.createElement("button");
-  coordButton1.style.padding = "8px 16px";
-  coordButton1.style.border = "none";
-  coordButton1.style.borderRadius = "4px";
-  coordButton1.style.background = "#fff";
-  coordButton1.style.cursor = "pointer";
-  coordButton1.style.fontFamily = "Arial, sans-serif";
-  coordButton1.style.fontSize = "14px";
-  coordContainer.appendChild(coordButton1);
-
-  // Create the second coordinate button
-  const coordButton2 = document.createElement("button");
-  coordButton2.style.padding = "8px 16px";
-  coordButton2.style.border = "none";
-  coordButton2.style.borderRadius = "4px";
-  coordButton2.style.background = "#fff";
-  coordButton2.style.cursor = "pointer";
-  coordButton2.style.fontFamily = "Arial, sans-serif";
-  coordButton2.style.fontSize = "14px";
-  coordContainer.appendChild(coordButton2);
-
   map.getViewport().addEventListener("click", () => {
-    coordContainer.style.display = "none";
+    hideContextMenu();
+    hideFeatureContextMenu();
   });
 
   map.getViewport().addEventListener("contextmenu", (evt) => {
     evt.preventDefault();
+
+    // Check if a feature is under the cursor
+    const pixel = map.getEventPixel(evt);
+    let hitFeature: Feature<Geometry> | null = null;
+
+    map.forEachFeatureAtPixel(
+      pixel,
+      (feature: FeatureLike) => {
+        if (feature instanceof Feature) {
+          hitFeature = feature as Feature<Geometry>;
+          return true;
+        }
+        return false;
+      },
+      { hitTolerance: 5 }
+    );
+
+    if (hitFeature) {
+      const props = { ...(hitFeature as any).getProperties() } as Record<string, unknown>;
+      if ("geometry" in props) {
+        delete (props as any).geometry;
+      }
+
+      showFeatureContextMenu({
+        x: evt.clientX,
+        y: evt.clientY,
+        properties: props,
+        featureId: ((hitFeature as any).getId() as string | number | null) ?? null,
+        feature: hitFeature,
+      });
+      hideContextMenu();
+      return;
+    }
+
+    // If no feature, show coordinates menu
     const coordinate = map.getEventCoordinate(evt);
     const [lon, lat] = toLonLat(coordinate);
 
-    // Set text for the first button
-    coordButton1.innerText = `/tpll ${lat.toFixed(5)}, ${lon.toFixed(5)}`;
-
+    const tpllText = `/tpll ${lat.toFixed(5)}, ${lon.toFixed(5)}`;
     const minecraftCoords = fromGeo(lat, lon);
+    const tpText = `/tp @p ${minecraftCoords[0].toFixed(0)} y ${minecraftCoords[1].toFixed(0)}`;
 
-    // Set text for the second button
-    coordButton2.innerText = `/tp @p ${minecraftCoords[0].toFixed(0)} y ${minecraftCoords[1].toFixed(0)}`;
-
-    coordContainer.style.left = `${evt.clientX}px`;
-    coordContainer.style.top = `${evt.clientY}px`;
-    coordContainer.style.display = "flex";
-  });
-
-  coordButton1.addEventListener("click", () => {
-    const coordsText = coordButton1.innerText;
-    navigator.clipboard
-      .writeText(coordsText)
-      .then(() => {
-        coordContainer.style.display = "none";
-      })
-      .catch((err) => alert("Error copying to clipboard: " + err));
-  });
-
-  coordButton2.addEventListener("click", () => {
-    const coordsText = coordButton2.innerText;
-    navigator.clipboard
-      .writeText(coordsText)
-      .then(() => {
-        coordContainer.style.display = "none";
-      })
-      .catch((err) => alert("Error copying to clipboard: " + err));
+    showContextMenu({
+      x: evt.clientX,
+      y: evt.clientY,
+      tpllText,
+      tpText,
+    });
+    hideFeatureContextMenu();
   });
 }
 
@@ -585,18 +554,8 @@ export function enableDrawing(
 
     feature.setId("feature-" + generateUniqueId());
 
-    // Check if the feature's geometry type is 'LineString'
-    if (feature.getGeometry()?.getType() === "LineString") {
-      // Add the 'test' property only for LineString features
-      feature.set("elevationStart", 0);
-      feature.set("elevationEnd", 0);
-    } else {
-      feature.set("elevation", 0);
-    }
-
-    // TODO: Add height
-    // feature.set("height", 1);
-    feature.set("block", "diamond_block");
+    // Newly created features intentionally have no default properties
+    // (height, elevation, block, etc.).
 
     disableDrawing();
     setTimeout(() => {
@@ -667,11 +626,15 @@ function enableFeatureSelection() {
 
   selectedFeatures.on("add", () => {
     selectionChangeCallback(selectedFeatures);
+    hasSelectedFeatures.set(selectedFeatures.getLength() > 0);
+    selectedFeature.set(selectedFeatures.getArray()[0] || null);
     enableMoveMode();
   });
-  selectedFeatures.on("remove", () =>
-    selectionChangeCallback(selectedFeatures)
-  );
+  selectedFeatures.on("remove", () => {
+    selectionChangeCallback(selectedFeatures);
+    hasSelectedFeatures.set(selectedFeatures.getLength() > 0);
+    selectedFeature.set(selectedFeatures.getArray()[0] || null);
+  });
 
   map.addInteraction(selectInteraction);
   ensureRotateInteractionOnTop();
