@@ -3,7 +3,8 @@ import VectorLayer from "ol/layer/Vector";
 import VectorSource from "ol/source/Vector";
 import { Feature } from "ol";
 import GeoJSON from "ol/format/GeoJSON";
-import { vectorLayers } from "./mapUtils";
+import { vectorLayers } from "./vectorLayerUtils";
+import type TileLayer from "ol/layer/Tile";
 
 // Type definitions for storing and retrieving vector layers
 interface VectorLayerData {
@@ -12,15 +13,32 @@ interface VectorLayerData {
   geojson: string;
 }
 
+// Type definitions for storing and retrieving map (tile) layers
+interface MapLayerData {
+  id: string;
+  name: string;
+  url: string;
+  maxZoom: number;
+}
+
 // Initialize IndexedDB
+const DB_VERSION = 3;
+
 function initDB(dbName: string, storeName: string): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
-    const request = indexedDB.open(dbName, 1);
+    const request = indexedDB.open(dbName, DB_VERSION);
 
     request.onupgradeneeded = (event) => {
       const db = (event.target as IDBOpenDBRequest).result;
-      if (!db.objectStoreNames.contains(storeName)) {
-        db.createObjectStore(storeName, { keyPath: "id" });
+      // Ensure both stores exist after upgrade
+      if (!db.objectStoreNames.contains('vectorLayers')) {
+        db.createObjectStore('vectorLayers', { keyPath: 'id' });
+      }
+      if (!db.objectStoreNames.contains('mapLayers')) {
+        db.createObjectStore('mapLayers', { keyPath: 'id' });
+      }
+      if (!db.objectStoreNames.contains('mapLayerOrder')) {
+        db.createObjectStore('mapLayerOrder', { keyPath: 'id' });
       }
     };
 
@@ -172,4 +190,107 @@ export async function deleteVectorLayerById(
             reject((event.target as IDBRequest).error);
         };
     });
+}
+
+// Store a tile map layer in IndexedDB
+export async function storeMapLayer(
+  tileLayer: TileLayer,
+  dbName: string = "myMapDB",
+  storeName: string = "mapLayers"
+): Promise<string> {
+  const db = await initDB(dbName, storeName);
+
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction([storeName], "readwrite");
+    const store = transaction.objectStore(storeName);
+
+    const id = tileLayer.get("id");
+    const name = tileLayer.get("name") ?? id;
+    const url = tileLayer.get("xyzUrl") ?? "";
+    const maxZoom = tileLayer.get("maxZoom") ?? 18;
+
+    const data: MapLayerData = { id, name, url, maxZoom } as MapLayerData;
+
+    const request = store.put(data);
+
+    request.onsuccess = () => resolve("Map layer stored successfully");
+    request.onerror = (event) => reject((event.target as IDBRequest).error);
+  });
+}
+
+// Retrieve all map layers metadata (to be reconstructed by utils)
+export async function retrieveAllMapLayers(
+  dbName: string = 'myMapDB',
+  storeName: string = 'mapLayers'
+): Promise<{ [id: string]: MapLayerData }> {
+  const db = await initDB(dbName, storeName);
+
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction([storeName], 'readonly');
+    const store = transaction.objectStore(storeName);
+
+    const request = store.getAll();
+
+    request.onsuccess = (event) => {
+      const results = (event.target as IDBRequest<MapLayerData[]>).result;
+      const out: { [id: string]: MapLayerData } = {};
+      results.forEach((item) => {
+        out[item.id] = item;
+      });
+      resolve(out);
+    };
+
+    request.onerror = (event) => reject((event.target as IDBRequest).error);
+  });
+}
+
+export async function deleteMapLayerById(
+  layerId: string,
+  dbName: string = 'myMapDB',
+  storeName: string = 'mapLayers'
+): Promise<string> {
+  const db = await initDB(dbName, storeName);
+
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction([storeName], 'readwrite');
+    const store = transaction.objectStore(storeName);
+
+    const request = store.delete(layerId);
+
+    request.onsuccess = () => resolve(`Map layer with ID ${layerId} deleted successfully`);
+    request.onerror = (event) => reject((event.target as IDBRequest).error);
+  });
+}
+
+// Persist and retrieve map layer order
+export async function storeMapLayerOrder(
+  orderIds: string[],
+  dbName: string = 'myMapDB',
+  storeName: string = 'mapLayerOrder'
+): Promise<void> {
+  const db = await initDB(dbName, storeName);
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction([storeName], 'readwrite');
+    const store = tx.objectStore(storeName);
+    const req = store.put({ id: 'order', order: orderIds });
+    req.onsuccess = () => resolve();
+    req.onerror = (e) => reject((e.target as IDBRequest).error);
+  });
+}
+
+export async function retrieveMapLayerOrder(
+  dbName: string = 'myMapDB',
+  storeName: string = 'mapLayerOrder'
+): Promise<string[] | null> {
+  const db = await initDB(dbName, storeName);
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction([storeName], 'readonly');
+    const store = tx.objectStore(storeName);
+    const req = store.get('order');
+    req.onsuccess = (e) => {
+      const val = (e.target as IDBRequest<any>).result;
+      resolve(val ? (val.order as string[]) : null);
+    };
+    req.onerror = (e) => reject((e.target as IDBRequest).error);
+  });
 }

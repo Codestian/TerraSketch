@@ -2,6 +2,9 @@
     import Window from '../../components/Window.svelte';
     import Layers from './tabs/Layers.svelte';
     import Maps from './tabs/Maps.svelte';
+    import { onMount } from 'svelte';
+    import { initLayersFromDBOnce } from '../../../../stores/layersStore';
+    import { initMapLayersFromDBOnce } from '../../../../utils/mapLayerUtils';
     // import Images from './tabs/Images.svelte';
 
     const components = {
@@ -9,6 +12,11 @@
         'Maps': Maps,
         // 'Images': Images,
     };
+
+    onMount(() => {
+        initLayersFromDBOnce();
+        initMapLayersFromDBOnce();
+    });
 </script>
 
 <Window

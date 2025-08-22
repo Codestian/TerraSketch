@@ -3,9 +3,9 @@
   import {
     featureContextMenuState,
     hideFeatureContextMenu,
-  } from "../../utils/featureContextMenuStore";
+  } from "../../stores/featureContextMenuStore";
   import { tick } from "svelte";
-  import { vectorLayers } from "../../utils/mapUtils";
+  import { vectorLayers } from "../../utils/vectorLayerUtils";
   import type VectorLayer from "ol/layer/Vector";
 
   function onBackgroundClick() {

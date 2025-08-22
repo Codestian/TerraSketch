@@ -1,16 +1,16 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { getMap, getVectorLayerContext } from "../../../../../utils/mapUtils";
   import {
     createVectorLayer,
     removeVectorLayer,
     setActiveLayer,
-    getMap,
     importGeoJSON,
-    vectorLayers,
-    map,
     renameLayer,
-  } from "../../../../../utils/mapUtils";
-  import WindowButton from "$lib/common/WindowButton.svelte";
+  } from "../../../../../utils/vectorLayerUtils";
+  import { layers as layersStore, selectedLayerId as selectedLayerIdStore } from "../../../../../stores/layersStore";
+  import type { Layer } from "../../../../../stores/layersStore";
+  import LayersPanel from "./shared/LayersPanel.svelte";
   import type { Vector as VectorLayer } from "ol/layer";
   import type { Feature } from "ol";
   import Geometry from "ol/geom/Geometry";
@@ -28,21 +28,11 @@
   import type { FeatureExport } from "../../../../../utils/iFeatureExprt";
   import {
     deleteVectorLayerById,
-    retrieveAllVectorLayers,
   } from "../../../../../utils/saveLayers";
-  import Modal from "$lib/common/Modal.svelte";
   import GeoJSON from "ol/format/GeoJSON";
+  
 
-  interface Layer {
-    id: string; // Unique ID
-    name: string; // Display name
-    visible: boolean;
-  }
-
-  let layers: Layer[] = [];
   let newLayerName: string = "";
-  let selectedLayerId: string | null = null;
-  let fileInput: HTMLInputElement;
 
   let showModal = false;
 
@@ -87,6 +77,7 @@
     }
 
     try {
+      const importFileName = pendingImportFile?.name ?? "Imported.geojson";
       const elevationStart = parseFloat(elevationStartInput) || 0;
       const elevationEnd = parseFloat(elevationEndInput) || 0;
       const elevation = parseFloat(elevationInput) || 0;
@@ -96,16 +87,16 @@
         elevationStart,
         elevationEnd,
         elevation,
-      });
+      }, getVectorLayerContext());
       const newLayer = getMap()
         .getLayers()
         .getArray()
         .slice(-1)[0] as VectorLayer;
       const newLayerId = newLayer.get("id") as string;
 
-      layers.push({ id: newLayerId, name: pendingImportFile.name, visible: true });
-      setActiveLayer(newLayerId);
-      selectedLayerId = newLayerId;
+      layersStore.update(arr => [...arr, { id: newLayerId, name: importFileName, visible: true }]);
+      setActiveLayer(newLayerId, getVectorLayerContext());
+      selectedLayerIdStore.set(newLayerId);
     } catch (error: any) {
       importErrorMessage = `Error importing GeoJSON file: ${error}`;
     } finally {
@@ -114,74 +105,42 @@
     }
   }
 
-  onMount(() => {
-    retrieveAllVectorLayers()
-      .then((listOfLayers) => {
-        let firstId = "";
-
-        Object.keys(listOfLayers).forEach((id, index) => {
-          if (listOfLayers.hasOwnProperty(id)) {
-            vectorLayers[id] = listOfLayers[id].layer;
-
-            vectorLayers[id].set("id", id); // Set a unique ID for each layer
-            vectorLayers[id].set("name", listOfLayers[id].name);
-            map.addLayer(listOfLayers[id].layer);
-
-            if (index === 0) {
-              layers.push({
-                id: id,
-                name: listOfLayers[id].name,
-                visible: true,
-              });
-              firstId = id;
-            } else {
-              layers.push({
-                id: id,
-                name: listOfLayers[id].name,
-                visible: true,
-              });
-            }
-          }
-        });
-
-        setActiveLayer(firstId);
-        selectedLayerId = firstId;
-      })
-      .catch(() => {});
-  });
+  // Initialization of layers list is handled by SecondWindow via layersStore
 
   // Function to add a new layer
   function addLayer() {
-    const name = newLayerName.trim() || `Layer ${layers.length + 1}`;
-    const newLayer = createVectorLayer(name);
+    const name = newLayerName.trim() || `Layer ${$layersStore.length + 1}`;
+    const newLayer = createVectorLayer(name, getVectorLayerContext());
     const newLayerId = newLayer.get("id");
 
-    layers.push({ id: newLayerId, name: name, visible: true });
-    setActiveLayer(newLayerId);
-    selectedLayerId = newLayerId;
+    layersStore.update(arr => [...arr, { id: newLayerId, name: name, visible: true }]);
+    setActiveLayer(newLayerId, getVectorLayerContext());
+    selectedLayerIdStore.set(newLayerId);
 
     newLayerName = ""; // Clear the input field
   }
 
   // Function to delete the selected layer
   function deleteLayer() {
-    if (selectedLayerId) {
-      const currentIndex = layers.findIndex(layer => layer.id === selectedLayerId);
+    if ($selectedLayerIdStore) {
+      const currentIndex = $layersStore.findIndex(layer => layer.id === $selectedLayerIdStore);
       
-      deleteVectorLayerById(selectedLayerId).then(() => {
-        removeVectorLayer(selectedLayerId!);
-        layers = layers.filter((layer) => layer.id !== selectedLayerId);
+      deleteVectorLayerById($selectedLayerIdStore).then(() => {
+        removeVectorLayer($selectedLayerIdStore!, getVectorLayerContext());
+        layersStore.update(arr => arr.filter((layer) => layer.id !== $selectedLayerIdStore));
         
         // Auto-select next layer or no layer if none left
-        if (layers.length > 0) {
+        if ($layersStore.length > 0) {
           // If we deleted the last layer, select the new last layer
           // Otherwise, select the next layer in the list
-          const nextIndex = Math.min(currentIndex, layers.length - 1);
-          selectedLayerId = layers[nextIndex].id;
-          setActiveLayer(selectedLayerId);
+          const nextIndex = Math.min(currentIndex, $layersStore.length - 1);
+          const nextId = $layersStore[nextIndex].id;
+          selectedLayerIdStore.set(nextId);
+          setActiveLayer(nextId, getVectorLayerContext());
         } else {
           // No layers left, clear selection
-          selectedLayerId = null;
+          selectedLayerIdStore.set(null);
+          try { localStorage.removeItem('activeLayerId'); } catch {}
         }
         
         showDeleteConfirm = false; // Hide confirmation after deletion
@@ -220,9 +179,9 @@
 
   // Function to select a layer by its unique ID
   function selectLayer(layerId: string) {
-    if (selectedLayerId !== layerId) {
-      setActiveLayer(layerId);
-      selectedLayerId = layerId;
+    if ($selectedLayerIdStore !== layerId) {
+      setActiveLayer(layerId, getVectorLayerContext());
+      selectedLayerIdStore.set(layerId);
     } else {
     }
   }
@@ -238,6 +197,7 @@
     if (mapLayer) {
       mapLayer.setVisible(layer.visible);
     }
+    layersStore.update(arr => arr.map(l => l.id === layer.id ? { ...l, visible: layer.visible } : l));
   }
 
   // Function to handle GeoJSON file import
@@ -255,8 +215,8 @@
   }
 
   function downloadGeojson() {
-    if (selectedLayerId) {
-      const features = getFeaturesOfSelectedLayer(selectedLayerId);
+    if ($selectedLayerIdStore) {
+      const features = getFeaturesOfSelectedLayer($selectedLayerIdStore);
       const geojsonFormat = new GeoJSON();
       const obj: any = geojsonFormat.writeFeaturesObject(features!, {
         featureProjection: "EPSG:3857",
@@ -276,8 +236,8 @@
   }
 
   function convertAndGetDimensions() {
-    if (selectedLayerId) {
-      const features = getFeaturesOfSelectedLayer(selectedLayerId);
+    if ($selectedLayerIdStore) {
+      const features = getFeaturesOfSelectedLayer($selectedLayerIdStore);
 
       // List to store final coordinates
       let newFinalList: FeatureExport[] = [];
@@ -383,12 +343,7 @@
     return null;
   }
 
-  // Function to trigger the file input click
-  function triggerFileInput() {
-    if (fileInput) {
-      fileInput.click();
-    }
-  }
+  // file input handled inside shared panel
 
   let inputValue = "";
 
@@ -403,6 +358,7 @@
 
   function handleBlur(id: string) {
     renameLayer(id, inputValue);
+    layersStore.update(arr => arr.map(l => l.id === id ? { ...l, name: inputValue } : l));
   }
 
   let selectedOption: string = "Schematic";
@@ -430,649 +386,47 @@
   }
 </script>
 
-<div class="layers-manager">
-  <div class="row">
-    <WindowButton
-      onClick={triggerFileInput}
-      iconClass="fas fa-download"
-      label="Import"
-      width="auto"
-      flexGrow={true}
-    />
-    <WindowButton
-      onClick={() => {
-        convertAndGetDimensions();
-      }}
-      iconClass="fas fa-upload"
-      label="Export"
-      width="auto"
-      flexGrow={true}
-    />
-    <input
-      type="file"
-      accept=".geojson"
-      on:change={handleImport}
-      bind:this={fileInput}
-      style="display: none;"
-    />
-  </div>
-  <div class="list {showDeleteConfirm ? 'dimmed' : ''}">
-    {#each layers as layer (layer.id)}
-      <div
-        class="layer-item {selectedLayerId === layer.id ? 'selected' : ''}"
-        on:click={() => selectLayer(layer.id)}
-      >
-        <input
-          class="layer-name-input"
-          type="text"
-          value={layer.name}
-          on:click={handleInputClick}
-          on:blur={() => handleBlur(layer.id)}
-          on:input={handleInput}
-        />
-        <input
-          type="checkbox"
-          on:click={(event) => {
-            event.stopPropagation();
-            toggleVisibility(layer, event);
-          }}
-          checked={layer.visible}
-        />
-      </div>
-    {/each}
-  </div>
-  <div class="controls">
-    <button on:click={addLayer}><i class="fas fa-plus"></i></button>
-    
-    <div class="delete-container">
-      <div class="delete-confirmation {showDeleteConfirm ? 'show' : ''}">
-        <span class="confirm-text">Confirm delete layer?</span>
-        <div class="confirm-buttons">
-          <button class="confirm-yes" on:click={deleteLayer}>Yes</button>
-          <button class="confirm-no" on:click={cancelDelete}>No</button>
-        </div>
-      </div>
-      
-      <button 
-        on:click={showDeleteConfirmation} 
-        disabled={!selectedLayerId}
-        class="delete-btn"
-      >
-        <i class="fas fa-trash-can"></i>
-      </button>
-    </div>
-  </div>
-</div>
 
-<Modal title="Export" show={showModal} on:close={toggleModal}>
-  <div class="export-row">
-    <div
-      class="option {selectedOption === 'Schematic' ? 'selected' : ''}"
-      on:click={() => selectOption("Schematic")}
-    >
-      Schematic
-    </div>
-    <div
-      class="option {selectedOption === 'GeoJSON' ? 'selected' : ''}"
-      on:click={() => selectOption("GeoJSON")}
-    >
-      GeoJSON
-    </div>
-  </div>
-  <div class="export-content">
-    {#if selectedOption === "Schematic"}
-      <div class="info">
-        <label for="version">Version:</label>
-        <select
-          id="version"
-          bind:value={selectedVersion}
-          on:change={handleVersionChange}
-        >
-          <option value="" disabled>Select a version</option>
-          <option value="1">1</option>
-          <option value="2">2</option>
-          <option value="3">3</option>
-        </select>
-      </div>
-      <div class="info">
-        <div class="measurement-container">
-          <span class="measurement">Length: {exportLength}</span>
-          <span class="measurement">Width: {exportWidth}</span>
-          <span class="measurement">Height: {exportHeight}</span>
-        </div>
-        {#if exportHeight >= 5000 || exportWidth >= 5000 || exportLength >= 5000}
-          <div class="warning">
-            ⚠️ Warning: One or more dimensions exceed the 5000 limit.
-          </div>
-        {/if}
-      </div>
-      <div>
-        <span>ASEAN offset</span>
-        <input
-          type="checkbox"
-          on:click={(event) => {
-            event.stopPropagation();
-            isOffsetEnabled = !isOffsetEnabled;
-          }}
-          checked={isOffsetEnabled}
-        />
-      </div>
-      <button
-        on:click={() => {
-          if (
-            exportHeight >= 5000 ||
-            exportWidth >= 5000 ||
-            exportLength >= 5000
-          ) {
-            let userChoice = confirm(
-              "Warning: Layer size is more than 5000 blocks. Try to reduce the size. This may crash your browser!",
-            );
+<LayersPanel
+  layers={$layersStore}
+  selectedLayerId={$selectedLayerIdStore}
+  {showDeleteConfirm}
+  {showModal}
+  {selectedOption}
+  {selectedVersion}
+  {exportLength}
+  {exportWidth}
+  {exportHeight}
+  {isOffsetEnabled}
+  {showImportConfirm}
+  {showImportProgress}
+  {importErrorMessage}
+  {blockName}
+  {elevationStartInput}
+  {elevationEndInput}
+  {elevationInput}
+  pendingImportFileName={pendingImportFile?.name ?? ""}
+  pendingImportFileSize={pendingImportFile?.size ?? 0}
+  onExportClick={convertAndGetDimensions}
+  onSelectLayer={selectLayer}
+  onToggleVisibility={(l, e) => toggleVisibility(l, e)}
+  onAddLayer={addLayer}
+  onShowDelete={showDeleteConfirmation}
+  onCancelDelete={cancelDelete}
+  onDelete={deleteLayer}
+  onNameInputClick={handleInputClick}
+  onNameInput={handleInput}
+  onNameBlur={(id) => handleBlur(id)}
+  onHandleImport={handleImport}
+  onCloseImportConfirm={closeImportConfirm}
+  onConfirmImport={confirmImport}
+  onToggleModal={toggleModal}
+  onSelectOption={selectOption}
+  onVersionChange={handleVersionChange}
+  onToggleOffset={() => (isOffsetEnabled = !isOffsetEnabled)}
+  onDownloadGeojson={downloadGeojson}
+  onCreateSchematic={createSchematicWithOffset}
+  onCloseImportError={() => (importErrorMessage = null)}
+/>
 
-            if (userChoice) {
-              createSchematicWithOffset();
-            } else {
-            }
-          } else {
-            createSchematicWithOffset();
-          }
-        }}
-        class="export-btn">Export</button
-      >
-    {/if}
 
-    {#if selectedOption === "GeoJSON"}
-      <button
-        on:click={() => {
-          downloadGeojson();
-        }}
-        class="export-btn">Export</button
-      >
-    {/if}
-
-    {#if !selectedOption}
-      <p>Please select an option above to see the content.</p>
-    {/if}
-  </div>
-</Modal>
-
-<Modal title="Import GeoJSON" show={showImportConfirm} on:close={closeImportConfirm}>
-  <div class="import-confirm">
-    <p>Do you want to import the file:</p>
-    <p class="filename">{pendingImportFile?.name}</p>
-    <p class="filesize">
-      Size: {pendingImportFile ? (pendingImportFile.size / (1024 * 1024)).toFixed(2) : '0'} MB
-    </p>
-    <div class="field">
-      <label>Default block</label>
-      <input type="text" bind:value={blockName} />
-    </div>
-    <div class="grid">
-      <div class="field">
-        <label>Line start elevation</label>
-        <input type="number" bind:value={elevationStartInput} />
-      </div>
-      <div class="field">
-        <label>Line end elevation</label>
-        <input type="number" bind:value={elevationEndInput} />
-      </div>
-      <div class="field">
-        <label>Other shapes elevation</label>
-        <input type="number" bind:value={elevationInput} />
-      </div>
-    </div>
-    {#if pendingImportFile && pendingImportFile.size > LARGE_FILE_BYTES}
-      <p class="warning">This is a large file. Import may take a while.</p>
-    {/if}
-    <div class="actions">
-      <button class="cancel" on:click={closeImportConfirm}>Cancel</button>
-      <button class="confirm" on:click={confirmImport}>Import</button>
-    </div>
-  </div>
-  </Modal>
-
-<Modal title="Importing..." show={showImportProgress} on:close={() => {}}>
-  <div class="import-progress">
-    <div class="progress-bar">
-      <div class="progress-bar-fill"></div>
-    </div>
-    <p>Please wait while the file is being imported.</p>
-  </div>
-</Modal>
-
-{#if importErrorMessage}
-  <Modal title="Import Error" show={true} on:close={() => (importErrorMessage = null)}>
-    <div class="import-error">
-      <p>{importErrorMessage}</p>
-      <div class="actions">
-        <button class="confirm" on:click={() => (importErrorMessage = null)}>Close</button>
-      </div>
-    </div>
-  </Modal>
-{/if}
-
-<style lang="scss">
-  .layers-manager {
-    width: 100%;
-    height: 100%;
-    padding: 8px;
-    display: flex;
-    flex-direction: column;
-    position: relative;
-
-    .row {
-      width: 100%;
-      display: flex;
-      justify-content: space-around;
-      gap: 8px;
-      padding-bottom: 8px;
-      user-select: none;
-    }
-
-    .list {
-      width: 100%;
-      overflow-y: scroll;
-      scrollbar-color: rgba(255, 255, 255, 0.4) rgba(255, 255, 255, 0.1);
-      scrollbar-width: thin;
-      height: 100%;
-      position: relative;
-
-      &.dimmed {
-        opacity: 0.4;
-        pointer-events: none;
-      }
-
-      .layer-item {
-        padding: 4px;
-        margin-bottom: 2px;
-        margin-right: 8px;
-        background: rgba(255, 255, 255, 0.1);
-        cursor: pointer;
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        color: white;
-        transition: background 0.3s;
-
-        &:hover {
-          background: rgba(255, 255, 255, 0.05);
-        }
-
-        &.selected {
-          background: rgba(255, 255, 255, 0.3);
-        }
-
-        input[type="checkbox"] {
-          margin-left: 10px;
-          cursor: pointer;
-          appearance: none; /* Remove default checkbox appearance */
-          width: 24px; /* Set width */
-          height: 24px; /* Set height */
-          border: 1px solid rgba(255, 255, 255, 0.2); /* Border color */
-          background: rgba(0, 0, 0, 0.05); /* Default background */
-          position: relative;
-
-          &:checked {
-            background: green; /* Background color when checked */
-            background: green;
-          }
-
-          &:checked:before {
-            content: "";
-            position: absolute;
-            top: 3px; /* Adjust based on your preference */
-            left: 8px; /* Adjust based on your preference */
-            width: 4px; /* Width of the checkmark */
-            height: 12px; /* Height of the checkmark */
-            border: solid white;
-            border-width: 0 2px 2px 0;
-            transform: rotate(45deg);
-            opacity: 1; /* Show checkmark when checked */
-          }
-        }
-
-        .layer-name-input {
-          border: none;
-          padding: 8px;
-          background: rgba(0, 0, 0, 0.4);
-          color: white;
-          font-size: 0.7rem;
-          outline: none;
-        }
-      }
-    }
-
-    .controls {
-      width: 100%;
-      height: 32px;
-      background: rgba(255, 255, 255, 0.05);
-      display: flex;
-      justify-content: flex-end;
-
-      button {
-        width: 32px;
-        height: 32px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        color: white;
-        background: rgba(255, 255, 255, 0.1);
-        border: 1px solid rgba(255, 255, 255, 0.05);
-        cursor: pointer;
-        font-weight: bold;
-        text-transform: uppercase;
-
-        i {
-          font-size: 0.8rem;
-        }
-
-        &:disabled {
-          cursor: not-allowed;
-          opacity: 0.5;
-        }
-      }
-
-      .delete-btn {
-        position: relative;
-        width: 32px;
-        height: 32px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        color: white;
-        background: rgba(255, 255, 255, 0.1);
-        border: 1px solid rgba(255, 255, 255, 0.05);
-        cursor: pointer;
-        font-weight: bold;
-        text-transform: uppercase;
-
-        i {
-          font-size: 0.8rem;
-        }
-
-        &:disabled {
-          cursor: not-allowed;
-          opacity: 0.5;
-        }
-      }
-
-      .delete-container {
-        position: relative;
-        display: flex;
-        align-items: center;
-        gap: 8px;
-      }
-
-      .delete-confirmation {
-        position: absolute;
-        bottom: calc(100% + 8px);
-        right: 0;
-        display: flex;
-        flex-direction: column;
-        gap: 8px;
-        padding: 12px;
-        background: rgb(41, 41, 41);
-        border: 1px solid rgba(255, 255, 255, 0.1);
-        color: white;
-        z-index: 1000;
-        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
-        opacity: 0;
-        transform: scale(0.3);
-        transform-origin: bottom right;
-        transition: all 0.1s cubic-bezier(0.4, 0, 0.2, 1);
-        pointer-events: none;
-        visibility: hidden;
-
-        &.show {
-          opacity: 1;
-          transform: scale(1);
-          pointer-events: auto;
-          visibility: visible;
-        }
-      }
-
-      .delete-confirmation.show {
-        opacity: 1;
-        transform: translateY(0);
-        pointer-events: auto;
-      }
-
-      .confirm-text {
-        font-weight: bold;
-        font-size: 0.8rem;
-        white-space: nowrap;
-      }
-
-      .confirm-buttons {
-        display: flex;
-        justify-content: flex-end;
-        gap: 8px;
-
-        button {
-          width: auto;
-          height: auto;
-          padding: 6px 12px;
-          background-color: rgba(255, 255, 255, 0.2);
-          border: 1px solid rgba(255, 255, 255, 0.1);
-          color: white;
-          font-weight: bold;
-          text-transform: uppercase;
-          cursor: pointer;
-          transition: background 0.3s;
-          font-size: 0.7rem;
-
-          &:hover {
-            background: rgba(255, 255, 255, 0.1);
-          }
-
-          &.confirm-yes {
-            background-color: rgb(201, 13, 13);
-            border-color: rgb(255, 0, 0);
-          }
-
-          &.confirm-no {
-            background-color: rgba(255, 255, 255, 0.1);
-            border-color: rgba(255, 255, 255, 0.1);
-          }
-        }
-      }
-    }
-  }
-
-  .export-row {
-    width: 100%;
-    display: flex;
-    gap: 8px;
-    margin-bottom: 8px;
-
-    .option {
-      flex: 1;
-      background: rgba(255, 255, 255, 0.1);
-      padding: 12px;
-      text-align: center;
-      font-size: 0.8rem;
-      font-weight: bold;
-      letter-spacing: 1px;
-      cursor: pointer;
-      transition: background 0.3s;
-      user-select: none;
-
-      &:hover {
-        background: rgba(255, 255, 255, 0.05);
-      }
-
-      &.selected {
-        background: rgba(255, 255, 255, 0.2);
-      }
-    }
-  }
-
-  .export-content {
-    display: flex;
-    flex-direction: column;
-
-    .info {
-      display: flex;
-      flex-direction: column;
-      gap: 0.5rem;
-
-      p {
-        margin: 0;
-      }
-
-      .measurement-container {
-        display: flex;
-        width: 100%;
-        margin-top: 12px;
-        margin-bottom: 12px;
-
-        .measurement {
-          flex: 1;
-          text-align: center;
-          padding: 0.5rem;
-          font-size: 0.8rem;
-          text-transform: uppercase;
-          font-weight: bold;
-          letter-spacing: 2px;
-          background: rgba(255, 255, 255, 0.05);
-          border: 1px solid rgba(255, 255, 255, 0.1);
-        }
-      }
-
-      .warning {
-        font-size: 0.8rem;
-        margin-bottom: 20px;
-      }
-    }
-
-    button {
-      cursor: pointer;
-      padding: 8px 16px;
-      background-color: green;
-      border-top: 3px solid rgba(255, 255, 255, 0.1);
-      border-left: 3px solid rgba(255, 255, 255, 0.1);
-      border-bottom: 3px solid rgba(0, 0, 0, 0.3);
-      border-right: 3px solid rgba(0, 0, 0, 0.3);
-      font-size: 0.6rem;
-      font-weight: bold;
-      color: white;
-      letter-spacing: 2px;
-      text-transform: uppercase;
-    }
-  }
-
-  /* Import modal inputs */
-  .import-confirm {
-    .field {
-      display: flex;
-      flex-direction: column;
-      gap: 4px;
-      margin-top: 6px;
-    }
-    .grid {
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-      margin-top: 6px;
-    }
-    input[type="text"], input[type="number"] {
-      padding: 6px;
-      color: white;
-      background: rgba(0, 0, 0, 0.4);
-      border: 1px solid rgba(255, 255, 255, 0.1);
-    }
-  }
-
-  .import-confirm {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-
-    .filename {
-      font-weight: bold;
-      word-break: break-all;
-    }
-
-    .filesize {
-      opacity: 0.8;
-      font-size: 0.8rem;
-    }
-
-    .warning {
-      color: orange;
-      font-size: 0.8rem;
-    }
-
-    .actions {
-      display: flex;
-      justify-content: flex-end;
-      gap: 8px;
-
-      button {
-        cursor: pointer;
-        padding: 8px 16px;
-        background-color: green;
-        border-top: 3px solid rgba(255, 255, 255, 0.1);
-        border-left: 3px solid rgba(255, 255, 255, 0.1);
-        border-bottom: 3px solid rgba(0, 0, 0, 0.3);
-        border-right: 3px solid rgba(0, 0, 0, 0.3);
-        font-size: 0.6rem;
-        font-weight: bold;
-        color: white;
-        letter-spacing: 2px;
-        text-transform: uppercase;
-      }
-
-      .cancel {
-        background-color: rgba(255, 255, 255, 0.2);
-      }
-    }
-  }
-
-  .import-progress {
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-
-    .progress-bar {
-      position: relative;
-      width: 100%;
-      height: 10px;
-      background: rgba(255, 255, 255, 0.1);
-      overflow: hidden;
-      border: 1px solid rgba(255, 255, 255, 0.2);
-
-      .progress-bar-fill {
-        position: absolute;
-        left: -40%;
-        width: 40%;
-        height: 100%;
-        background: green;
-        animation: progress-indeterminate 1s linear infinite;
-      }
-    }
-
-    @keyframes progress-indeterminate {
-      0% { left: -40%; }
-      100% { left: 100%; }
-    }
-  }
-
-  .import-error {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-
-    .actions {
-      display: flex;
-      justify-content: flex-end;
-
-      .confirm {
-        background: green;
-        color: white;
-      }
-    }
-  }
-
-
-
-</style>

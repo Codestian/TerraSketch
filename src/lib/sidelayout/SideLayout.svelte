@@ -91,7 +91,8 @@
 
 <style lang="scss">
   .sidelayout {
-    background: rgb(23, 25, 26);
+    background: rgba(23, 25, 26, 0.95);
+    backdrop-filter: blur(36px);
     position: absolute;
     top: 0;
     right: 0;
