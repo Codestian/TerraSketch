@@ -16,7 +16,7 @@
 		"@sveltejs/adapter-static": "^3.0.4",
 		"@sveltejs/kit": "^2.0.0",
 		"@sveltejs/vite-plugin-svelte": "^3.0.0",
-		"@types/ol-ext": "npm:@siedlerchr/types-ol-ext@^3.5.0",
+		"@types/ol-ext": "npm:@siedlerchr/types-ol-ext@^3.6.3",
 		"@types/pako": "^2.0.3",
 		"buffer": "^6.0.3",
 		"prettier": "^3.1.1",

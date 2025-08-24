@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { createMapLayer, mapLayers, removeMapLayer, renameMapLayer, setMapLayerVisibility, initMapLayersFromDBOnce } from "../../../../../utils/mapLayerUtils";
+  import { createMapLayer, mapLayers, removeMapLayer, renameMapLayer, setMapLayerVisibility, setMapLayerOpacity, getMapLayerOpacity, initMapLayersFromDBOnce } from "../../../../../utils/mapLayerUtils";
   import { getMap } from "../../../../../utils/mapUtils";
   import LayersPanel from "./shared/LayersPanel.svelte";
   import Modal from "$lib/common/Modal.svelte";
@@ -9,6 +9,7 @@
 
   let layers: Layer[] = [];
   let selectedLayerId: string | null = null;
+  let opacity: number = 1;
 
   let showDeleteConfirm = false;
   let inputValue = "";
@@ -34,10 +35,14 @@
       visible: mapLayers[id].getVisible(),
     }));
     selectedLayerId = layers[0]?.id ?? null;
+    if (selectedLayerId) {
+      opacity = getMapLayerOpacity(selectedLayerId);
+    }
   });
 
   function handleSelectLayer(id: string) {
     selectedLayerId = id;
+    opacity = getMapLayerOpacity(id);
   }
 
   function createMap() {
@@ -62,10 +67,11 @@
       return;
     }
 
-    const layer = createMapLayer(name, { map: getMap() }, { url, maxZoom });
+    const layer = createMapLayer(name, { map: getMap() }, { url, maxZoom, opacity: 1 });
     const id = layer.get("id") as string;
     layers = [...layers, { id, name, visible: true }];
     selectedLayerId = id;
+    opacity = 1;
     // persist
     storeMapLayer(layer).catch(() => {});
     storeMapLayerOrder(layers.map((l) => l.id)).catch(() => {});
@@ -105,8 +111,10 @@
     if (layers.length > 0) {
       const nextIndex = Math.min(currentIndex, layers.length - 1);
       selectedLayerId = layers[nextIndex].id;
+      opacity = getMapLayerOpacity(selectedLayerId);
     } else {
       selectedLayerId = null;
+      opacity = 1;
     }
     storeMapLayerOrder(layers.map((l) => l.id)).catch(() => {});
     showDeleteConfirm = false;
@@ -149,6 +157,14 @@
   {showDeleteConfirm}
   showImportButton={false}
   showExportButton={false}
+  showOpacitySlider={true}
+  {opacity}
+  onOpacityChange={(newOpacity) => {
+    if (selectedLayerId) {
+      setMapLayerOpacity(selectedLayerId, newOpacity);
+      // Auto-save is now handled by setMapLayerOpacity function
+    }
+  }}
   onSelectLayer={handleSelectLayer}
   onToggleVisibility={(l, e) => toggleVisibility(l, e)}
   onAddLayer={createMap}

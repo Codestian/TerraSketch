@@ -53,6 +53,11 @@
   export let onCreateSchematic: () => void = () => {};
   export let onCloseImportError: () => void = () => {};
   export let onReorder: (fromIndex: number, toIndex: number) => void = () => {};
+  
+  // Opacity-related props
+  export let showOpacitySlider: boolean = false;
+  export let opacity: number = 1;
+  export let onOpacityChange: (opacity: number) => void = () => {};
 
   let fileInput: HTMLInputElement;
   function triggerFileInput() {
@@ -156,6 +161,23 @@
       </div>
     {/each}
   </div>
+  
+  {#if showOpacitySlider}
+    <div class="opacity-control">
+      <label for="layer-opacity">Layer Opacity: {opacity.toFixed(2)}</label>
+      <input
+        id="layer-opacity"
+        type="range"
+        min="0"
+        max="1"
+        step="0.01"
+        bind:value={opacity}
+        on:input={() => onOpacityChange(+opacity)}
+        style="width: 100%;"
+      />
+    </div>
+  {/if}
+  
   <div class="controls">
     <button on:click={() => { if (!disabled) onAddLayer(); }} disabled={disabled}><i class="fas fa-plus"></i></button>
     
@@ -402,6 +424,8 @@
               opacity: 1;
             }
           }
+
+
         }
 
         .layer-name-input {
@@ -691,6 +715,54 @@
       .confirm {
         background: green;
         color: white;
+      }
+    }
+  }
+
+  .opacity-control {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-top: 12px;
+    padding: 8px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 4px;
+    color: white;
+    font-size: 0.7rem;
+    font-weight: bold;
+    text-transform: uppercase;
+
+    label {
+      margin-bottom: 4px;
+    }
+
+    input[type="range"] {
+      -webkit-appearance: none;
+      width: 100%;
+      height: 8px;
+      background: rgba(255, 255, 255, 0.2);
+      border-radius: 4px;
+      outline: none;
+      cursor: pointer;
+
+      &::-webkit-slider-thumb {
+        -webkit-appearance: none;
+        appearance: none;
+        width: 20px;
+        height: 20px;
+        background: green;
+        border-radius: 50%;
+        margin-top: -6px;
+        box-shadow: 0 0 2px rgba(0, 0, 0, 0.2);
+      }
+
+      &::-moz-range-thumb {
+        width: 20px;
+        height: 20px;
+        background: green;
+        border-radius: 50%;
+        box-shadow: 0 0 2px rgba(0, 0, 0, 0.2);
       }
     }
   }

@@ -5,17 +5,25 @@
     import { onMount } from 'svelte';
     import { initLayersFromDBOnce } from '../../../../stores/layersStore';
     import { initMapLayersFromDBOnce } from '../../../../utils/mapLayerUtils';
-    // import Images from './tabs/Images.svelte';
+    import { restoreAllImageLayers } from '../../../../utils/imageLayerUtils';
+    import { getMap } from '../../../../utils/mapUtils';
+    import Images from './tabs/Images.svelte';
 
     const components = {
         'Layers': Layers,
         'Maps': Maps,
-        // 'Images': Images,
+        'Images': Images,
     };
 
     onMount(() => {
         initLayersFromDBOnce();
         initMapLayersFromDBOnce();
+        
+        // Restore image layers after map is ready
+        const map = getMap();
+        if (map) {
+            restoreAllImageLayers({ map });
+        }
     });
 </script>
 

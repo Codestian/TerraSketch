@@ -19,10 +19,24 @@ interface MapLayerData {
   name: string;
   url: string;
   maxZoom: number;
+  opacity: number;
+}
+
+// Type definitions for storing and retrieving image layers
+interface ImageLayerData {
+  id: string;
+  name: string;
+  imageData: string; // Base64 encoded image data instead of URL
+  opacity: number;
+  visible: boolean;
+  extent?: number[]; // [minX, minY, maxX, maxY]
+  scale?: number[]; // [scaleX, scaleY]
+  rotation?: number;
+  center?: number[]; // [centerX, centerY]
 }
 
 // Initialize IndexedDB
-const DB_VERSION = 3;
+const DB_VERSION = 5; 
 
 function initDB(dbName: string, storeName: string): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -30,7 +44,7 @@ function initDB(dbName: string, storeName: string): Promise<IDBDatabase> {
 
     request.onupgradeneeded = (event) => {
       const db = (event.target as IDBOpenDBRequest).result;
-      // Ensure both stores exist after upgrade
+      // Ensure all stores exist after upgrade
       if (!db.objectStoreNames.contains('vectorLayers')) {
         db.createObjectStore('vectorLayers', { keyPath: 'id' });
       }
@@ -39,6 +53,12 @@ function initDB(dbName: string, storeName: string): Promise<IDBDatabase> {
       }
       if (!db.objectStoreNames.contains('mapLayerOrder')) {
         db.createObjectStore('mapLayerOrder', { keyPath: 'id' });
+      }
+      if (!db.objectStoreNames.contains('imageLayers')) {
+        db.createObjectStore('imageLayers', { keyPath: 'id' });
+      }
+      if (!db.objectStoreNames.contains('imageLayerOrder')) {
+        db.createObjectStore('imageLayerOrder', { keyPath: 'id' });
       }
     };
 
@@ -208,8 +228,9 @@ export async function storeMapLayer(
     const name = tileLayer.get("name") ?? id;
     const url = tileLayer.get("xyzUrl") ?? "";
     const maxZoom = tileLayer.get("maxZoom") ?? 18;
+    const opacity = tileLayer.getOpacity() ?? 1;
 
-    const data: MapLayerData = { id, name, url, maxZoom } as MapLayerData;
+    const data: MapLayerData = { id, name, url, maxZoom, opacity } as MapLayerData;
 
     const request = store.put(data);
 
@@ -281,6 +302,169 @@ export async function storeMapLayerOrder(
 export async function retrieveMapLayerOrder(
   dbName: string = 'myMapDB',
   storeName: string = 'mapLayerOrder'
+): Promise<string[] | null> {
+  const db = await initDB(dbName, storeName);
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction([storeName], 'readonly');
+    const store = tx.objectStore(storeName);
+    const req = store.get('order');
+    req.onsuccess = (e) => {
+      const val = (e.target as IDBRequest<any>).result;
+      resolve(val ? (val.order as string[]) : null);
+    };
+    req.onerror = (e) => reject((e.target as IDBRequest).error);
+  });
+}
+
+// Store an image layer in IndexedDB
+export async function storeImageLayer(
+  imageLayer: any, // GeoImageLayer type
+  dbName: string = "myMapDB",
+  storeName: string = "imageLayers"
+): Promise<string> {
+  const db = await initDB(dbName, storeName);
+
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction([storeName], "readwrite");
+    const store = transaction.objectStore(storeName);
+
+    const id = imageLayer.get("id");
+    const name = imageLayer.get("name") ?? id;
+    const source = imageLayer.getSource();
+    
+    console.log(`Source object methods:`, {
+      sourceType: source?.constructor?.name,
+      availableMethods: source ? Object.getOwnPropertyNames(Object.getPrototypeOf(source)) : [],
+      sourceKeys: source ? Object.keys(source) : []
+    });
+    
+    // Extract image properties
+    const opacity = imageLayer.getOpacity() ?? 1;
+    const visible = imageLayer.getVisible() ?? true;
+    
+    // Extract transformation properties from the source
+    const scale = source?.getScale?.() || [1, 1];
+    const rotation = source?.getRotation?.() || 0;
+    const center = source?.getCenter?.() || [0, 0];
+    const extent = source?.getExtent?.() || undefined;
+    
+    console.log(`Extracting transformation properties from source:`, {
+      sourceExists: !!source,
+      hasGetScale: !!source?.getScale,
+      hasGetRotation: !!source?.getRotation,
+      hasGetCenter: !!source?.getCenter,
+      scale,
+      rotation,
+      center,
+      extent
+    });
+    
+    // Get the stored file data (base64) from the layer metadata
+    const imageData = imageLayer.get("fileData") || "";
+    
+    console.log(`Storing image layer ${id}:`, {
+      id,
+      name,
+      hasFileData: !!imageData,
+      imageDataLength: imageData.length,
+      imageDataStart: imageData.substring(0, 100),
+      layerKeys: Object.keys(imageLayer.getProperties?.() || {}),
+      fileDataExists: imageLayer.get("fileData") !== undefined,
+      opacity,
+      visible,
+      scale,
+      rotation,
+      center,
+      extent
+    });
+    
+    if (!imageData) {
+      console.error(`Layer ${id} missing fileData. Available properties:`, imageLayer.getProperties?.() || {});
+      reject("No file data found for image layer");
+      return;
+    }
+
+    const data: ImageLayerData = {
+      id,
+      name,
+      imageData,
+      opacity,
+      visible,
+      extent,
+      scale,
+      rotation,
+      center
+    };
+
+    const request = store.put(data);
+    request.onsuccess = () => resolve("Image layer stored successfully");
+    request.onerror = (event) => reject((event.target as IDBRequest).error);
+  });
+}
+
+// Retrieve all image layers metadata
+export async function retrieveAllImageLayers(
+  dbName: string = 'myMapDB',
+  storeName: string = 'imageLayers'
+): Promise<{ [id: string]: ImageLayerData }> {
+  const db = await initDB(dbName, storeName);
+
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction([storeName], 'readonly');
+    const store = transaction.objectStore(storeName);
+
+    const request = store.getAll();
+
+    request.onsuccess = (event) => {
+      const results = (event.target as IDBRequest<ImageLayerData[]>).result;
+      const out: { [id: string]: ImageLayerData } = {};
+      results.forEach((item) => {
+        out[item.id] = item;
+      });
+      resolve(out);
+    };
+
+    request.onerror = (event) => reject((event.target as IDBRequest).error);
+  });
+}
+
+export async function deleteImageLayerById(
+  layerId: string,
+  dbName: string = 'myMapDB',
+  storeName: string = 'imageLayers'
+): Promise<string> {
+  const db = await initDB(dbName, storeName);
+
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction([storeName], 'readwrite');
+    const store = transaction.objectStore(storeName);
+
+    const request = store.delete(layerId);
+
+    request.onsuccess = () => resolve(`Image layer with ID ${layerId} deleted successfully`);
+    request.onerror = (event) => reject((event.target as IDBRequest).error);
+  });
+}
+
+// Persist and retrieve image layer order
+export async function storeImageLayerOrder(
+  orderIds: string[],
+  dbName: string = 'myMapDB',
+  storeName: string = 'imageLayerOrder'
+): Promise<void> {
+  const db = await initDB(dbName, storeName);
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction([storeName], 'readwrite');
+    const store = tx.objectStore(storeName);
+    const req = store.put({ id: 'order', order: orderIds });
+    req.onsuccess = () => resolve();
+    req.onerror = (e) => reject((e.target as IDBRequest).error);
+  });
+}
+
+export async function retrieveImageLayerOrder(
+  dbName: string = 'myMapDB',
+  storeName: string = 'imageLayerOrder'
 ): Promise<string[] | null> {
   const db = await initDB(dbName, storeName);
   return new Promise((resolve, reject) => {
