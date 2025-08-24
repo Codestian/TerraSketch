@@ -1,6 +1,7 @@
 <script lang="ts">
   import { createEventDispatcher } from "svelte";
   import "@fortawesome/fontawesome-free/css/all.css";
+  import { portal } from "./portal";
 
   export let show: boolean = false;
   export let title: string = ""; 
@@ -14,10 +15,24 @@
   function handleCloseClick() {
     dispatch("close");
   }
+
+  function handleOverlayKeydown(e: KeyboardEvent) {
+    if (e.key === "Escape" || e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      handleOverlayClick();
+    }
+  }
 </script>
 
 {#if show}
-  <div class="modal-overlay" on:click={handleOverlayClick}>
+  <div
+    class="modal-overlay"
+    use:portal
+    on:click={handleOverlayClick}
+    role="button"
+    tabindex="0"
+    on:keydown={handleOverlayKeydown}
+  >
     <div class="modal-content" on:click|stopPropagation>
       <div class="modal-header">
         <h2>{title}</h2>
@@ -54,13 +69,12 @@
     position: fixed;
     top: 0;
     left: 0;
-    width: 100vw;
-    height: 100vh;
+    inset: 0;
     background-color: $overlay-bg;
     display: flex;
     justify-content: center;
     align-items: center;
-    z-index: 1000;
+    z-index: 2000;
 
     .modal-content {
       background: $modal-bg;

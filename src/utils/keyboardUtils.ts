@@ -1,5 +1,8 @@
 import { deleteSelectedFeatures, copySelectedFeatures, pasteCopiedFeatures, getSelectInteraction } from './mapUtils';
-import { rotateSelectedFeatures, flipSelectedFeaturesVerticallyUp, flipSelectedFeaturesVerticallyDown, flipSelectedFeaturesHorizontallyLeft, flipSelectedFeaturesHorizontallyRight } from './transformationUtils';
+import { rotateSelectedFeatures, flipSelectedFeaturesHorizontallyLeft, flipSelectedFeaturesHorizontallyRight } from './transformationUtils';
+import { scaleActiveImageLayer, rotateActiveImageLayer, activeImageLayerId, nudgeActiveImageLayerByPixels } from './imageLayerUtils';
+import { imagesTabActive } from '../stores/uiStore';
+import { get } from 'svelte/store';
 
 function handleKeyDown(event: KeyboardEvent) {
     // Check if the focused element is inside the table in Features.svelte
@@ -9,6 +12,15 @@ function handleKeyDown(event: KeyboardEvent) {
         return;
     }
 
+    // Handle W/A/S/D to move active image (10px per repeat) only when Images tab is active
+    const isImagesActive = get(imagesTabActive);
+    if (!event.altKey && !event.ctrlKey && !event.metaKey && activeImageLayerId && isImagesActive) {
+        const stepPx = 10;
+        if (event.key === 'w') { event.preventDefault(); nudgeActiveImageLayerByPixels(0, -stepPx); }
+        if (event.key === 's') { event.preventDefault(); nudgeActiveImageLayerByPixels(0, stepPx); }
+        if (event.key === 'a') { event.preventDefault(); nudgeActiveImageLayerByPixels(-stepPx, 0); }
+        if (event.key === 'd') { event.preventDefault(); nudgeActiveImageLayerByPixels(stepPx, 0); }
+    }
     if (event.key === 'Backspace' || event.key === 'Delete') {
         deleteSelectedFeatures();
     }
@@ -25,28 +37,27 @@ function handleKeyDown(event: KeyboardEvent) {
         pasteCopiedFeatures();
     }
 
-    // Handle Alt+Q (Rotate 90° clockwise/right)
-    if (event.key === 'q' && event.altKey) {
+    // Handle Alt+Q/E (Rotate image incrementally, only when Images tab is active; else rotate features 90°)
+    if (event.altKey && (event.key === 'q' || event.key === 'e')) {
         event.preventDefault();
-        rotateSelectedFeatures(90, getSelectInteraction()); // Negative for clockwise (right)
+        const isImagesActive = get(imagesTabActive);
+        if (activeImageLayerId && isImagesActive) {
+            rotateActiveImageLayer(event.key === 'q' ? -1 : 1);
+        } else {
+            rotateSelectedFeatures(event.key === 'q' ? 90 : -90, getSelectInteraction());
+        }
     }
 
-    // Handle Alt+E (Rotate 90° counterclockwise/left)
-    if (event.key === 'e' && event.altKey) {
+    // Handle Alt+W (Scale image up) only when Images tab is active
+    if (event.key === 'w' && event.altKey && get(imagesTabActive)) {
         event.preventDefault();
-        rotateSelectedFeatures(-90, getSelectInteraction()); // Positive for counterclockwise (left)
+        scaleActiveImageLayer(1.05);
     }
 
-    // Handle Alt+W (Flip vertically upward)
-    if (event.key === 'w' && event.altKey) {
+    // Handle Alt+S (Scale image down) only when Images tab is active
+    if (event.key === 's' && event.altKey && get(imagesTabActive)) {
         event.preventDefault();
-        flipSelectedFeaturesVerticallyUp(getSelectInteraction());
-    }
-
-    // Handle Alt+S (Flip vertically downward)
-    if (event.key === 's' && event.altKey) {
-        event.preventDefault();
-        flipSelectedFeaturesVerticallyDown(getSelectInteraction());
+        scaleActiveImageLayer(0.95);
     }
 
     // Handle Alt+A (Flip horizontally leftward)

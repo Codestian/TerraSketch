@@ -41,11 +41,15 @@
             </tr>
             <tr>
               <td class="key">Alt + Q/E</td>
-              <td class="description">Rotate 90°</td>
+              <td class="description">Rotate image</td>
             </tr>
             <tr>
               <td class="key">Alt + W/S</td>
-              <td class="description">Flip vertically</td>
+              <td class="description">Scale image</td>
+            </tr>
+            <tr>
+              <td class="key">W/A/S/D</td>
+              <td class="description">Move image</td>
             </tr>
             <tr>
               <td class="key">Alt + A/D</td>
@@ -92,11 +96,12 @@
     .info {
       position: absolute;
       bottom: 0;
-      left: 0;
+      left: 48px;
       z-index: 5;
       margin: 12px;
       box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
       background: rgba(255, 255, 255, 0.8);
+      backdrop-filter: blur(16px);
       padding: 12px;
 
 
@@ -143,7 +148,7 @@
       position: absolute;
       z-index: 5;
       top: 0;
-      left: 0;
+      left: 48px;
       margin: 12px;
       cursor: pointer;
       padding: 8px 16px;

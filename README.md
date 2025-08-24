@@ -17,7 +17,7 @@
 
 - Categorize and save your work outlining with layers.
 - Draw lines, polygons and rectangles.
-- Load map tiles directly from sources such as MapBox, OSM or OneMap. (Right now only OSM or OneMap)
+- Load map tiles directly from sources.
 - Customize properties of outlines such as elevation and block type when importing in game.
 - Transform, rotate and copy easily for similar outlines.
 - Modify outlines faster.

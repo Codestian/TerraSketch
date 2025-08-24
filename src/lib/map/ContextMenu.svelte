@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { contextMenuState, hideContextMenu } from "../../utils/contextMenuStore";
+  import { contextMenuState, hideContextMenu } from "../../stores/contextMenuStore";
 
   function copy(text: string) {
     navigator.clipboard

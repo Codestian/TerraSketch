@@ -26,10 +26,14 @@ import {
 import VectorSource from "ol/source/Vector";
 import { Fill, Stroke, Style } from "ol/style";
 import { writable } from "svelte/store";
-import { MapTileLayer, mapTileLayers } from "./mapTileUtils";
 import { rotateSelectedFeatures } from "./transformationUtils";
-import { showContextMenu, hideContextMenu } from "./contextMenuStore";
-import { showFeatureContextMenu, hideFeatureContextMenu } from "./featureContextMenuStore";
+import { showContextMenu, hideContextMenu } from "../stores/contextMenuStore";
+import { showFeatureContextMenu, hideFeatureContextMenu } from "../stores/featureContextMenuStore";
+import TileLayer from "ol/layer/Tile";
+import { XYZ } from "ol/source";
+
+import { vectorLayers, activeLayerId, getActiveLayer } from "./vectorLayerUtils";
+import type { LayerContext } from "./vectorLayerUtils";
 
 
 // Create a Svelte store to keep track of the selected feature type
@@ -45,11 +49,13 @@ let doubleClickZoomInteraction: DoubleClickZoom | null = null;
 let rotatePointerInteraction: PointerInteraction | null = null;
 let mapMoveTimeout: number | null = null;
 
-// Manage multiple vector layers using a plain object
-export let vectorLayers: { [key: string]: VectorLayer } = {};
-export let activeLayerId: string | null = null;
-
 export const attributionText = writable("TerrasEdit");
+
+// Promise that resolves when the map has been initialized
+let resolveMapReady: (() => void) | null = null;
+export const mapReady: Promise<void> = new Promise((resolve) => {
+  resolveMapReady = resolve;
+});
 
 // Define styles for features
 const selectedFeatureStyle = new Style({
@@ -85,7 +91,7 @@ export const inactiveLayerFeatureStyle = new Style({
 // Callback to notify about selection changes
 let selectionChangeCallback: (
   selectedFeatures: Collection<Feature>
-) => void = () => {};
+) => void = () => { };
 
 export function onSelectionChange(
   callback: (selectedFeatures: Collection<Feature>) => void
@@ -181,7 +187,7 @@ function enableAltDragFreeRotate() {
       const dx = evt.coordinate[0] - center[0];
       const dy = evt.coordinate[1] - center[1];
       const angleRad = Math.atan2(dy, dx);
-      
+
       let deltaRad = angleRad - lastAngleRad;
       // Normalize to [-PI, PI] to prevent jumps across the wrap boundary
       if (deltaRad > Math.PI) deltaRad -= 2 * Math.PI;
@@ -203,167 +209,16 @@ function enableAltDragFreeRotate() {
   ensureRotateInteractionOnTop();
 }
 
-// Function to create a new vector layer with a unique ID and a given name
-export function createVectorLayer(name: string): VectorLayer {
-  const uniqueId = generateUniqueId();
-  const layerId = `layer-${uniqueId}`;
+// Note: all vector layer operations moved to vectorLayerUtils.ts
 
-  const newVectorLayer = new VectorLayer({
-    source: new VectorSource(),
-    style: inactiveLayerFeatureStyle, // Initialize with inactive layer style
-  });
-
-  newVectorLayer.set("id", layerId); // Set a unique ID for each layer
-  newVectorLayer.set("name", name); // Set the name for the layer
-
-  vectorLayers[layerId] = newVectorLayer;
-  map.addLayer(newVectorLayer);
-
-  if (!activeLayerId) {
-    activeLayerId = layerId;
-    setActiveLayer(layerId); // Set the first layer as the active layer and style it
-  }
-
-  return newVectorLayer;
-}
-
-// Helper function to generate a unique ID
-function generateUniqueId(): string {
-  return Math.random().toString(36).substring(2, 11); // Generate a random alphanumeric string
-}
-
-// Function to remove a vector layer
-export function removeVectorLayer(id: string) {
-  const layer = vectorLayers[id];
-  if (layer) {
-    map.removeLayer(layer);
-    delete vectorLayers[id];
-    if (activeLayerId === id) {
-      activeLayerId = null; // Reset active layer if it's removed
-    }
-  }
-}
-
-export function renameLayer(id: string, newName: string) {
-  if (vectorLayers[id]) {
-    vectorLayers[id].set("name", newName);
-  }
-}
-
-// Function to set the active layer by its unique ID
-export function setActiveLayer(id: string) {
-  if (vectorLayers[id]) {
-    // Clear selected features before switching layers
-    if (selectInteraction) {
-      selectInteraction.getFeatures().clear();
-    }
-
-    activeLayerId = id;
-    const activeLayer = vectorLayers[id];
-
-    // Remove the active layer from the map and re-add it to bring it to the top
-    map.removeLayer(activeLayer);
-    map.addLayer(activeLayer);
-
-    // Update the style of features in all layers
-    Object.keys(vectorLayers).forEach((layerId) => {
-      const layer = vectorLayers[layerId];
-      const isLayerActive = layerId === activeLayerId;
-      layer.setStyle((feature) => {
-        const isSelected = selectInteraction
-          ?.getFeatures()
-          .getArray()
-          .includes(feature as Feature);
-        if (isLayerActive) {
-          return isSelected ? selectedFeatureStyle : unselectedFeatureStyle;
-        } else {
-          return inactiveLayerFeatureStyle;
-        }
-      });
-    });
-
-    // Ensure the active layer is visible when selected
-    activeLayer.setVisible(true);
-  } else {
-    alert(`Layer with id '${id}' does not exist.`);
-  }
-}
-
-// Function to get the active layer
-export function getActiveLayer(): VectorLayer | null {
-  return activeLayerId ? vectorLayers[activeLayerId] || null : null;
-}
-
-export interface ImportOptions {
-  block: string;
-  elevationStart: number;
-  elevationEnd: number;
-  elevation: number;
-}
-
-// Function to import a GeoJSON file and add it as a new layer
-export function importGeoJSON(file: File, options: ImportOptions): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const geoJsonData = event.target?.result as string;
-      const format = new GeoJSON();
-      const features = format.readFeatures(geoJsonData, {
-        featureProjection: map.getView().getProjection(),
-      });
-
-      const { block, elevationStart, elevationEnd, elevation } = options;
-
-      // Loop through each feature and apply the corresponding elevation properties
-      features.forEach((feature: Feature) => {
-        const geometry = feature.getGeometry();
-        const properties = feature.getProperties();
-
-        if (geometry && geometry.getType() === "LineString") {
-          // Apply elevationStart and elevationEnd to LineString geometries if they don't exist
-          if (!properties.hasOwnProperty("elevationStart")) {
-            feature.set("elevationStart", elevationStart);
-          }
-          if (!properties.hasOwnProperty("elevationEnd")) {
-            feature.set("elevationEnd", elevationEnd);
-          }
-        } else {
-          // Apply elevation to other geometries if it doesn't exist
-          if (!properties.hasOwnProperty("elevation")) {
-            feature.set("elevation", elevation);
-          }
-        }
-        feature.set("block", block);
-      });
-
-      const uniqueId = generateUniqueId();
-      const layerId = `layer-${uniqueId}`;
-      const geoJsonLayer = new VectorLayer({
-        source: new VectorSource({
-          features: features,
-        }),
-        style: inactiveLayerFeatureStyle,
-      });
-
-      geoJsonLayer.set("id", layerId);
-      geoJsonLayer.set("name", file.name);
-
-      vectorLayers[layerId] = geoJsonLayer;
-      map.addLayer(geoJsonLayer);
-
-      // Move the map to the center of the features
-      const extent: Extent = geoJsonLayer.getSource()!.getExtent();
-      map.getView().fit(extent, { padding: [50, 50, 50, 50], duration: 1000 });
-
-      resolve();
-    };
-
-    reader.onerror = (error) => {
-      reject(error);
-    };
-
-    reader.readAsText(file);
-  });
+export function getVectorLayerContext(): LayerContext {
+  return {
+    map,
+    selectInteraction,
+    selectedFeatureStyle,
+    unselectedFeatureStyle,
+    inactiveLayerFeatureStyle,
+  };
 }
 
 // Add a right-click listener to display either feature properties menu or coordinates menu
@@ -430,12 +285,10 @@ function addRightClickListener(map: OLMap) {
 // Initializes the map
 export function initializeMap(target: HTMLElement) {
   const savedState = restoreMapState();
-  
+
   map = new OLMap({
     target: target,
-    layers: [
-      mapTileLayers[MapTileLayer.OSM], // Default to OSM layer instead of blank
-    ],
+    layers: [],
     view: new View({
       center: savedState ? fromLonLat([savedState.lon, savedState.lat]) : fromLonLat([0, 0]),
       zoom: savedState ? savedState.zoom : 3,
@@ -458,6 +311,9 @@ export function initializeMap(target: HTMLElement) {
       }),
     ]),
   });
+
+  // Set map background color
+  map.getViewport().style.background = "rgb(22 24 24)";
 
   // Add listener for when map movement ends
   map.getView().on('change:center', () => {
@@ -492,37 +348,9 @@ export function initializeMap(target: HTMLElement) {
   enableAltDragFreeRotate();
   addRightClickListener(map);
 
-  // // Define the extent of the image in map coordinates (in this case, EPSG:3857)
-  // const imageExtent: Extent = [0, 0, 1024, 968]; // Define your image extent here
-
-  // // Create an ImageStatic source to load the image
-  // const imageSource = new ImageStatic({
-  //   url: "https://cdn.britannica.com/34/235834-050-C5843610/two-different-breeds-of-cats-side-by-side-outdoors-in-the-garden.jpg", // Image URL
-  //   imageExtent: imageExtent,
-  // });
-
-  // // Create an ImageLayer using the ImageStatic source
-  // const imageLayer = new ImageLayer({
-  //   source: imageSource,
-  // });
-
-  // map.addLayer(imageLayer);
-}
-
-// Change the map's tile layer
-export function changeMapTileLayer(layer: MapTileLayer) {
-  const baseLayer = mapTileLayers[layer];
-  if (baseLayer) {
-    const layers = map.getLayers();
-    const layersArray = layers.getArray();
-    const markerAndVectorLayers = layersArray.slice(1); // Keep all layers except the first base layer
-    layers.clear(); // Clear existing layers
-    layers.push(baseLayer); // Add the new base layer
-    markerAndVectorLayers.forEach((existingLayer) =>
-      layers.push(existingLayer)
-    ); // Add remaining layers
-  } else {
-    alert(`Layer with key '${layer}' does not exist.`);
+  if (resolveMapReady) {
+    resolveMapReady();
+    resolveMapReady = null; // ensure it resolves only once
   }
 }
 
@@ -699,16 +527,6 @@ export function areFeaturesSelected(): boolean {
   );
 }
 
-
-
-
-
-
-
-
-
-
-
 // Deletes selected features
 export function deleteSelectedFeatures() {
   const map = getMap();
@@ -783,15 +601,19 @@ export function pasteCopiedFeatures() {
   const center = view.getCenter();
   if (!center) return;
 
-  // Determine the centroid of the copied features
-  const centroid = (copiedFeatures[0].getGeometry() as Polygon)
-    .getInteriorPoint()
-    .getCoordinates();
+  // Determine the center of the first copied feature using its extent (works for all geometry types)
+  const firstGeom = copiedFeatures[0].getGeometry();
+  if (!firstGeom) return;
+  const extent = firstGeom.getExtent();
+  const centroid: [number, number] = [
+    (extent[0] + extent[2]) / 2,
+    (extent[1] + extent[3]) / 2,
+  ];
 
   // Translate and paste each feature so that its centroid matches the center of the map view
   copiedFeatures.forEach((feature) => {
     const geometry = feature.getGeometry();
-    if (geometry && centroid) {
+    if (geometry) {
       const deltaX = center[0] - centroid[0];
       const deltaY = center[1] - centroid[1];
       geometry.translate(deltaX, deltaY);
@@ -843,7 +665,7 @@ function saveMapState() {
   const view = map.getView();
   const center = view.getCenter();
   const zoom = view.getZoom();
-  
+
   if (center) {
     const [lon, lat] = toLonLat(center);
     localStorage.setItem('mapState', JSON.stringify({
@@ -865,4 +687,8 @@ function restoreMapState(): { lat: number; lon: number; zoom: number } | null {
     }
   }
   return null;
+}
+
+export function generateUniqueId(): string {
+  return Math.random().toString(36).substring(2, 11);
 }
