@@ -30,6 +30,7 @@ export function createMapLayer(name: string, ctx: mapLayerContext, options: Crea
       transition: 0,
       crossOrigin: 'anonymous',
       cacheSize: 512,
+      wrapX: true,  // Allow horizontal wrapping and proper zoom beyond maxZoom
     }),
     preload: 1,
     opacity,
@@ -38,12 +39,24 @@ export function createMapLayer(name: string, ctx: mapLayerContext, options: Crea
   newMapLayer.set("id", mapLayerId);
   newMapLayer.set("name", name);
   newMapLayer.set("xyzUrl", url);
-  newMapLayer.set("maxZoom", maxZoom);
+  // Remove maxZoom from tile layer to allow zooming beyond source maxZoom
   newMapLayer.set("opacity", opacity);
 
   mapLayers[mapLayerId] = newMapLayer;
 
   ctx.map.getLayers().insertAt(0, newMapLayer);
+
+  // Auto-save the new layer to storage
+  import("./saveLayers").then(({ storeMapLayer, storeMapLayerOrder }) => {
+    storeMapLayer(newMapLayer).catch(err => {
+      console.error('Failed to auto-save new map layer:', err);
+    });
+    // Also save the updated layer order
+    const order = Object.keys(mapLayers);
+    storeMapLayerOrder(order).catch(err => {
+      console.error('Failed to auto-save map layer order:', err);
+    });
+  });
 
   return newMapLayer;
 }
@@ -67,7 +80,7 @@ export function setMapLayerOpacity(id: string, opacity: number) {
   if (layer) {
     layer.setOpacity(opacity);
     layer.set("opacity", opacity);
-    
+
     // Auto-save the layer when opacity changes
     import("./saveLayers").then(({ storeMapLayer }) => {
       storeMapLayer(layer).catch(err => {
@@ -100,23 +113,35 @@ export function restoreMapLayer(
   opacity: number,
   ctx: mapLayerContext
 ): TileLayer<TileSource> {
+  // Validate inputs
+  if (!id || !name || !url || typeof maxZoom !== 'number' || typeof opacity !== 'number') {
+    throw new Error(`Invalid parameters for restoreMapLayer: id=${id}, name=${name}, url=${url}, maxZoom=${maxZoom}, opacity=${opacity}`);
+  }
+  
+  // Ensure maxZoom is a valid number
+  const validMaxZoom = Math.max(0, Math.min(22, maxZoom));
+  
+  // Ensure opacity is between 0 and 1
+  const validOpacity = Math.max(0, Math.min(1, opacity));
+  
   const restoredLayer: TileLayer<XYZ> = new TileLayer({
     source: new XYZ({
       url,
-      maxZoom,
+      maxZoom: validMaxZoom,
       transition: 0,
       crossOrigin: 'anonymous',
       cacheSize: 512,
+      wrapX: true,  // Allow horizontal wrapping and proper zoom beyond maxZoom
     }),
     preload: 1,
-    opacity,
+    opacity: validOpacity,
   });
 
   restoredLayer.set("id", id);
   restoredLayer.set("name", name);
   restoredLayer.set("xyzUrl", url);
-  restoredLayer.set("maxZoom", maxZoom);
-  restoredLayer.set("opacity", opacity);
+  // Remove maxZoom from tile layer to allow zooming beyond source maxZoom
+  restoredLayer.set("opacity", validOpacity);
 
   mapLayers[id] = restoredLayer;
   ctx.map.getLayers().insertAt(0, restoredLayer);
@@ -130,12 +155,37 @@ export async function initMapLayersFromDBOnce() {
   if (!globalMap) { mapLayersInitialized = true; return; }
   try {
     const list = await retrieveAllMapLayers();
+    console.log('Retrieved map layers from storage:', list);
+    
     const order = (await retrieveMapLayerOrder()) || Object.keys(list);
+    console.log('Retrieved map layer order from storage:', order);
+    
     // First, restore all layers present
     Object.keys(list).forEach((id) => {
-      const { name, url, maxZoom, opacity = 1 } = list[id];
-      restoreMapLayer(id, name, url, maxZoom, opacity, { map: globalMap });
+      const layerData = list[id];
+      console.log('Processing layer data:', id, layerData);
+      
+      // Validate the layer data before restoring
+      if (!layerData || typeof layerData !== 'object') {
+        console.warn('Invalid layer data for ID:', id, layerData);
+        return;
+      }
+      
+      const { name, url, maxZoom, opacity = 1 } = layerData;
+      
+      // Validate required fields
+      if (!name || !url || typeof maxZoom !== 'number') {
+        console.warn('Missing required fields for layer:', id, { name, url, maxZoom });
+        return;
+      }
+      
+      try {
+        restoreMapLayer(id, name, url, maxZoom, opacity, { map: globalMap });
+      } catch (error) {
+        console.error('Failed to restore layer:', id, error);
+      }
     });
+    
     // Then, apply order by re-inserting in reverse
     const olLayers = globalMap.getLayers();
     order.forEach((id) => {
@@ -146,7 +196,18 @@ export async function initMapLayersFromDBOnce() {
       const layer = mapLayers[id];
       if (layer) olLayers.insertAt(0, layer);
     });
-  } catch {
+    
+    console.log('Successfully restored', Object.keys(list).length, 'map layers');
+    
+    // Clamp zoom level to available tile sources after layers are restored
+    import('./mapUtils').then(({ clampMapZoomToAvailableTiles }) => {
+      clampMapZoomToAvailableTiles();
+    }).catch(err => {
+      console.warn('Could not clamp zoom level:', err);
+    });
+    
+  } catch (error) {
+    console.error('Failed to restore map layers:', error);
     // no map layers; ignore
   } finally {
     mapLayersInitialized = true;

@@ -8,6 +8,7 @@
     onSelectionChange,
     deleteSelectedFeatures,
   } from "../../utils/mapUtils";
+  import { storeLayers } from "../../utils/saveLayers";
 
   let featuresSelected = false;
   let isMoveMode = true;
@@ -51,7 +52,14 @@
 
   onMount(() => {
     onSelectionChange((selectedFeatures) => {
+      const wasSelected = featuresSelected;
       featuresSelected = selectedFeatures.getLength() > 0;
+      
+      // Autosave when all features are completely unselected
+      if (wasSelected && !featuresSelected) {
+        storeLayers(true); // Silent autosave when all features are unselected
+      }
+      
       if (!featuresSelected) {
         toggleMoveMode();
       }
@@ -64,6 +72,7 @@
     {#if !featuresSelected}
       <Button iconClass="fas fa-slash" label="" onClick={drawLineString} />
       <Button iconClass="fas fa-draw-polygon" label="" onClick={drawPolygon} />
+      <Button iconClass="fas fa-circle" label="" onClick={drawCircle} />
       <Button iconClass="far fa-square" label="" onClick={drawRectangle} />
     {/if}
     {#if featuresSelected}

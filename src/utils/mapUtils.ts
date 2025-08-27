@@ -30,10 +30,11 @@ import { rotateSelectedFeatures } from "./transformationUtils";
 import { showContextMenu, hideContextMenu } from "../stores/contextMenuStore";
 import { showFeatureContextMenu, hideFeatureContextMenu } from "../stores/featureContextMenuStore";
 import TileLayer from "ol/layer/Tile";
-import { XYZ } from "ol/source";
+import { OSM, XYZ } from "ol/source";
 
 import { vectorLayers, activeLayerId, getActiveLayer } from "./vectorLayerUtils";
 import type { LayerContext } from "./vectorLayerUtils";
+import { storeLayers } from "./saveLayers";
 
 
 // Create a Svelte store to keep track of the selected feature type
@@ -282,10 +283,44 @@ function addRightClickListener(map: OLMap) {
   });
 }
 
+// Export a function to clamp zoom level that can be called from other modules
+export function clampMapZoomToAvailableTiles() {
+  try {
+    const view = map.getView();
+    const currentZoom = view.getZoom();
+    if (!currentZoom) return;
+    
+    // Find the highest maxZoom among all tile sources
+    let maxAvailableZoom = 18; // Default fallback
+    
+    // Check all layers in the map
+    const layers = map.getLayers();
+    layers.forEach(layer => {
+      // Check if this is a tile layer with a source
+      if ('getSource' in layer) {
+        const source = (layer as any).getSource();
+        // Check if it's an XYZ source
+        if (source && 'maxZoom_' in source) {
+          // @ts-ignore - accessing internal maxZoom property
+          const sourceMaxZoom = source.maxZoom_ || 18;
+          maxAvailableZoom = Math.max(maxAvailableZoom, sourceMaxZoom);
+        }
+      }
+    });
+    
+    // Clamp zoom if necessary
+    if (currentZoom > maxAvailableZoom) {
+      view.setZoom(maxAvailableZoom);
+      console.log(`Clamped zoom from ${currentZoom} to ${maxAvailableZoom} based on available tile sources`);
+    }
+  } catch (error) {
+    console.warn('Error clamping zoom level:', error);
+  }
+}
+
 // Initializes the map
 export function initializeMap(target: HTMLElement) {
   const savedState = restoreMapState();
-
   map = new OLMap({
     target: target,
     layers: [],
@@ -459,6 +494,7 @@ function enableFeatureSelection() {
     enableMoveMode();
   });
   selectedFeatures.on("remove", () => {
+    storeLayers(true); // Silent autosave when features are unselected
     selectionChangeCallback(selectedFeatures);
     hasSelectedFeatures.set(selectedFeatures.getLength() > 0);
     selectedFeature.set(selectedFeatures.getArray()[0] || null);

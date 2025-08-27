@@ -12,8 +12,10 @@ function handleKeyDown(event: KeyboardEvent) {
         return;
     }
 
-    // Handle W/A/S/D to move active image (10px per repeat) only when Images tab is active
+    // Get the current state of Images tab
     const isImagesActive = get(imagesTabActive);
+
+    // Handle W/A/S/D to move active image (10px per repeat) only when Images tab is active
     if (!event.altKey && !event.ctrlKey && !event.metaKey && activeImageLayerId && isImagesActive) {
         const stepPx = 10;
         if (event.key === 'w') { event.preventDefault(); nudgeActiveImageLayerByPixels(0, -stepPx); }
@@ -21,6 +23,35 @@ function handleKeyDown(event: KeyboardEvent) {
         if (event.key === 'a') { event.preventDefault(); nudgeActiveImageLayerByPixels(-stepPx, 0); }
         if (event.key === 'd') { event.preventDefault(); nudgeActiveImageLayerByPixels(stepPx, 0); }
     }
+
+    // Handle image-specific shortcuts when Images tab is active
+    if (isImagesActive && activeImageLayerId) {
+        // Handle Alt+Q/E (Rotate image incrementally)
+        if (event.altKey && (event.key === 'q' || event.key === 'e')) {
+            event.preventDefault();
+            rotateActiveImageLayer(event.key === 'q' ? -1 : 1);
+        }
+
+        // Handle Alt+W (Scale image up)
+        if (event.key === 'w' && event.altKey) {
+            event.preventDefault();
+            scaleActiveImageLayer(1.05);
+        }
+
+        // Handle Alt+S (Scale image down)
+        if (event.key === 's' && event.altKey) {
+            event.preventDefault();
+            scaleActiveImageLayer(0.95);
+        }
+    }
+
+    // Disable vector layer shortcuts when Images tab is active
+    if (isImagesActive) {
+        // Only allow image-specific shortcuts when Images tab is active
+        return;
+    }
+
+    // Vector layer shortcuts - only active when Images tab is NOT active
     if (event.key === 'Backspace' || event.key === 'Delete') {
         deleteSelectedFeatures();
     }
@@ -37,36 +68,19 @@ function handleKeyDown(event: KeyboardEvent) {
         pasteCopiedFeatures();
     }
 
-    // Handle Alt+Q/E (Rotate image incrementally, only when Images tab is active; else rotate features 90°)
+    // Handle Alt+Q/E (Rotate features 90°) - only when Images tab is NOT active
     if (event.altKey && (event.key === 'q' || event.key === 'e')) {
         event.preventDefault();
-        const isImagesActive = get(imagesTabActive);
-        if (activeImageLayerId && isImagesActive) {
-            rotateActiveImageLayer(event.key === 'q' ? -1 : 1);
-        } else {
-            rotateSelectedFeatures(event.key === 'q' ? 90 : -90, getSelectInteraction());
-        }
+        rotateSelectedFeatures(event.key === 'q' ? 90 : -90, getSelectInteraction());
     }
 
-    // Handle Alt+W (Scale image up) only when Images tab is active
-    if (event.key === 'w' && event.altKey && get(imagesTabActive)) {
-        event.preventDefault();
-        scaleActiveImageLayer(1.05);
-    }
-
-    // Handle Alt+S (Scale image down) only when Images tab is active
-    if (event.key === 's' && event.altKey && get(imagesTabActive)) {
-        event.preventDefault();
-        scaleActiveImageLayer(0.95);
-    }
-
-    // Handle Alt+A (Flip horizontally leftward)
+    // Handle Alt+A (Flip horizontally leftward) - only when Images tab is NOT active
     if (event.key === 'a' && event.altKey) {
         event.preventDefault();
         flipSelectedFeaturesHorizontallyLeft(getSelectInteraction());
     }
 
-    // Handle Alt+D (Flip horizontally rightward)
+    // Handle Alt+D (Flip horizontally rightward) - only when Images tab is NOT active
     if (event.key === 'd' && event.altKey) {
         event.preventDefault();
         flipSelectedFeaturesHorizontallyRight(getSelectInteraction());
