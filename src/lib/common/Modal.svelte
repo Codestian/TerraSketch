@@ -79,7 +79,7 @@
     .modal-content {
       background: $modal-bg;
       color: white;
-      max-width: 500px;
+      max-width: 600px;
       width: 90%;
       box-shadow: $box-shadow;
       transition: width $transition;
@@ -88,15 +88,15 @@
       animation: pop-up 0.2s forwards; /* Apply the pop-up animation */
 
       @media (min-width: 768px) {
-        width: 80%;
+        width: 85%;
       }
 
       @media (min-width: 1024px) {
-        width: 70%;
+        width: 75%;
       }
 
       @media (min-width: 1200px) {
-        width: 60%;
+        width: 65%;
       }
 
       .modal-header {
@@ -129,9 +129,9 @@
         }
       }
 
-      .modal-body {
-        padding: 8px;
-      }
+      // .modal-body {
+      //   padding: 8px;
+      // }
     }
   }
 </style>

@@ -72,13 +72,15 @@ function initDB(dbName: string, storeName: string): Promise<IDBDatabase> {
   });
 }
 
-export function storeLayers() {
+export function storeLayers(silent: boolean = false) {
   for (const key in vectorLayers) {
     // Get the strongly typed value with this name:
     const value = vectorLayers[key];
     storeVectorLayer(value);
   }
-  alert('Saved!');
+  if (!silent) {
+    alert('Saved!');
+  }
 }
 
 // Store a vector layer in IndexedDB

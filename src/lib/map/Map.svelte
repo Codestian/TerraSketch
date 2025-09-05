@@ -7,6 +7,7 @@
   } from "../../utils/keyboardUtils";
   import { storeLayers } from "../../utils/saveLayers";
   import { attributionText, hasSelectedFeatures } from "../../utils/mapUtils";
+  import { imagesTabActive } from "../../stores/uiStore";
   import ContextMenu from "./ContextMenu.svelte";
   import FeatureContextMenu from "./FeatureContextMenu.svelte";
 
@@ -25,11 +26,37 @@
 </script>
 
 <div bind:this={mapContainer} class="map-container">
-  <button on:click={storeLayers} class="save">Save</button>
   <div class="info">
     <div id="controls">
       <div class="keyboard-shortcuts">
-        {#if $hasSelectedFeatures}
+        {#if $imagesTabActive}
+          <table class="shortcuts-table-images">
+            <tr>
+              <td class="key">W/A/S/D</td>
+              <td class="description">Move active image</td>
+            </tr>
+            <tr>
+              <td class="key">Alt + Q/E</td>
+              <td class="description">Rotate active image</td>
+            </tr>
+            <tr>
+              <td class="key">Alt + W/S</td>
+              <td class="description">Scale active image</td>
+            </tr>
+            <tr>
+              <td class="key">Left🖱️</td>
+              <td class="description">Select one</td>
+            </tr>
+            <tr>
+              <td class="key">Shift + Left🖱️</td>
+              <td class="description">Select multiple</td>
+            </tr>
+            <tr>
+              <td class="key">Right🖱️</td>
+              <td class="description">Open context menu</td>
+            </tr>
+          </table>
+        {:else if $hasSelectedFeatures}
           <table class="shortcuts-table-selected">
             <tr>
               <td class="key">Right🖱️</td>
@@ -41,15 +68,7 @@
             </tr>
             <tr>
               <td class="key">Alt + Q/E</td>
-              <td class="description">Rotate image</td>
-            </tr>
-            <tr>
-              <td class="key">Alt + W/S</td>
-              <td class="description">Scale image</td>
-            </tr>
-            <tr>
-              <td class="key">W/A/S/D</td>
-              <td class="description">Move image</td>
+              <td class="description">Rotate feature</td>
             </tr>
             <tr>
               <td class="key">Alt + A/D</td>

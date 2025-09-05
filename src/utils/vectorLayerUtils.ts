@@ -13,9 +13,7 @@ export let activeLayerId: string | null = null;
 
 export type ImportOptions = {
   block: string;
-  elevationStart: number;
-  elevationEnd: number;
-  elevation: number;
+  elevation?: number;
 };
 
 export type LayerContext = {
@@ -120,29 +118,107 @@ export function importGeoJSON(
     const reader = new FileReader();
     reader.onload = (event) => {
       const geoJsonData = event.target?.result as string;
+      console.log('Raw GeoJSON data:', geoJsonData.substring(0, 500) + '...');
+      
       const format = new GeoJSON();
       const features = format.readFeatures(geoJsonData, {
         featureProjection: ctx.map.getView().getProjection(),
       });
 
-      const { block, elevationStart, elevationEnd, elevation } = options;
+      const { block, elevation = 0 } = options;
+      
+      console.log('Importing GeoJSON with options:', { block, elevation });
+      console.log('Number of features to process:', features.length);
+      console.log('Map projection:', ctx.map.getView().getProjection().getCode());
 
-      features.forEach((feature: Feature) => {
-        const geometry = feature.getGeometry();
-        const properties = feature.getProperties();
-        if (geometry && geometry.getType() === "LineString") {
-          if (!Object.prototype.hasOwnProperty.call(properties, "elevationStart")) {
-            feature.set("elevationStart", elevationStart);
-          }
-          if (!Object.prototype.hasOwnProperty.call(properties, "elevationEnd")) {
-            feature.set("elevationEnd", elevationEnd);
+      features.forEach((feature: Feature, index: number) => {
+        feature.set("block", block);
+        
+        // Apply elevation to 2D coordinates if elevation is provided
+        if (elevation !== 0) {
+          const geometry = feature.getGeometry();
+          if (geometry) {
+            console.log(`Feature ${index}: Geometry type: ${geometry.getType()}`);
+            console.log(`Feature ${index}: Geometry extent:`, geometry.getExtent());
+            
+            try {
+              // For Point geometry
+              if (geometry.getType() === 'Point') {
+                const pointGeom = geometry as any;
+                const coords = pointGeom.getCoordinates();
+                console.log(`Feature ${index}: Point coordinates before:`, coords);
+                console.log(`Feature ${index}: Point coordinates length:`, coords ? coords.length : 'undefined');
+                if (coords && coords.length === 2) {
+                  const newCoords = [coords[0], coords[1], elevation];
+                  pointGeom.setCoordinates(newCoords);
+                  console.log(`Feature ${index}: Point coordinates after elevation:`, newCoords);
+                } else if (coords && coords.length === 3) {
+                  console.log(`Feature ${index}: Point already has 3D coordinates:`, coords);
+                }
+              }
+              // For LineString geometry
+              else if (geometry.getType() === 'LineString') {
+                const lineGeom = geometry as any;
+                const coords = lineGeom.getCoordinates();
+                console.log(`Feature ${index}: LineString coordinates before:`, coords);
+                if (coords && coords.length > 0) {
+                  console.log(`Feature ${index}: First coord length:`, coords[0] ? coords[0].length : 'undefined');
+                  if (coords[0].length === 2) {
+                    const newCoords = coords.map((coord: any) => [coord[0], coord[1], elevation]);
+                    lineGeom.setCoordinates(newCoords);
+                    console.log(`Feature ${index}: LineString coordinates after elevation:`, newCoords);
+                  } else if (coords[0].length === 3) {
+                    console.log(`Feature ${index}: LineString already has 3D coordinates`);
+                  }
+                }
+              }
+              // For Polygon geometry
+              else if (geometry.getType() === 'Polygon') {
+                const polyGeom = geometry as any;
+                const coords = polyGeom.getCoordinates();
+                console.log(`Feature ${index}: Polygon coordinates before:`, coords);
+                if (coords && coords.length > 0 && coords[0].length > 0) {
+                  console.log(`Feature ${index}: First ring first coord length:`, coords[0][0] ? coords[0][0].length : 'undefined');
+                  if (coords[0][0].length === 2) {
+                    const newCoords = coords.map((ring: any) => 
+                      ring.map((coord: any) => [coord[0], coord[1], elevation])
+                    );
+                    polyGeom.setCoordinates(newCoords);
+                    console.log(`Feature ${index}: Polygon coordinates after elevation:`, newCoords);
+                  } else if (coords[0][0].length === 3) {
+                    console.log(`Feature ${index}: Polygon already has 3D coordinates`);
+                  }
+                }
+              }
+              // For MultiPolygon geometry
+              else if (geometry.getType() === 'MultiPolygon') {
+                const multiPolyGeom = geometry as any;
+                const coords = multiPolyGeom.getCoordinates();
+                console.log(`Feature ${index}: MultiPolygon coordinates before:`, coords);
+                if (coords && coords.length > 0 && coords[0].length > 0 && coords[0][0].length > 0) {
+                  console.log(`Feature ${index}: First polygon first ring first coord length:`, coords[0][0][0] ? coords[0][0][0].length : 'undefined');
+                  if (coords[0][0][0].length === 2) {
+                    const newCoords = coords.map((polygon: any) => 
+                      polygon.map((ring: any) => 
+                        ring.map((coord: any) => [coord[0], coord[1], elevation])
+                      )
+                    );
+                    multiPolyGeom.setCoordinates(newCoords);
+                    console.log(`Feature ${index}: MultiPolygon coordinates after elevation:`, newCoords);
+                  } else if (coords[0][0][0].length === 3) {
+                    console.log(`Feature ${index}: MultiPolygon already has 3D coordinates`);
+                  }
+                }
+              }
+            } catch (error) {
+              console.warn(`Error applying elevation to feature ${index}:`, error);
+            }
+          } else {
+            console.log(`Feature ${index}: No geometry found`);
           }
         } else {
-          if (!Object.prototype.hasOwnProperty.call(properties, "elevation")) {
-            feature.set("elevation", elevation);
-          }
+          console.log(`Feature ${index}: No elevation to apply (elevation = ${elevation})`);
         }
-        feature.set("block", block);
       });
 
       const uniqueId = generateUniqueId();
@@ -161,6 +237,7 @@ export function importGeoJSON(
       const extent: Extent = geoJsonLayer.getSource()!.getExtent();
       ctx.map.getView().fit(extent, { padding: [50, 50, 50, 50], duration: 1000 });
 
+      console.log('Import completed successfully');
       resolve();
     };
 
