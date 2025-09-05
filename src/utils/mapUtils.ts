@@ -8,7 +8,7 @@ import { defaults as defaultControls } from "ol/control";
 import { click } from "ol/events/condition";
 import type { Extent } from "ol/extent";
 import { GeoJSON } from "ol/format"; // Import GeoJSON format for handling GeoJSON data
-import { Polygon } from "ol/geom";
+import { Polygon, Circle } from "ol/geom";
 import type Geometry from "ol/geom/Geometry";
 import { defaults as defaultInteractions, DragRotate } from "ol/interaction";
 import DoubleClickZoom from "ol/interaction/DoubleClickZoom";
@@ -249,19 +249,25 @@ function addRightClickListener(map: OLMap) {
     );
 
     if (hitFeature) {
-      const props = { ...(hitFeature as any).getProperties() } as Record<string, unknown>;
-      if ("geometry" in props) {
-        delete (props as any).geometry;
-      }
+      // Check if only one feature is selected before opening the feature context menu
+      if (selectInteraction && selectInteraction.getFeatures().getLength() === 1) {
+        const props = { ...(hitFeature as any).getProperties() } as Record<string, unknown>;
+        if ("geometry" in props) {
+          delete (props as any).geometry;
+        }
 
-      showFeatureContextMenu({
-        x: evt.clientX,
-        y: evt.clientY,
-        properties: props,
-        featureId: ((hitFeature as any).getId() as string | number | null) ?? null,
-        feature: hitFeature,
-      });
-      hideContextMenu();
+        showFeatureContextMenu({
+          x: evt.clientX,
+          y: evt.clientY,
+          properties: props,
+          featureId: ((hitFeature as any).getId() as string | number | null) ?? null,
+          feature: hitFeature,
+        });
+        hideContextMenu();
+        return;
+      }
+      // If multiple features are selected, don't show the feature context menu
+      // Just return without showing any menu
       return;
     }
 
@@ -389,6 +395,36 @@ export function initializeMap(target: HTMLElement) {
   }
 }
 
+// Converts a circle geometry to a polygon using OpenLayers built-in method
+// This ensures circles are properly handled in export and other operations
+function convertCircleToPolygon(circle: Circle): Polygon {
+  // Use OpenLayers built-in method to get circle coordinates
+  // The getCoordinates() method returns coordinates that can be used to create a polygon
+  const coordinates = circle.getCoordinates();
+  if (coordinates) {
+    return new Polygon(coordinates);
+  }
+  
+  // Fallback: if getCoordinates() returns null, use the manual approach
+  const center = circle.getCenter();
+  const radius = circle.getRadius();
+  
+  const vertices: [number, number][] = [];
+  const numberOfSides = 64;
+  
+  for (let i = 0; i < numberOfSides; i++) {
+    const angle = (i * 2 * Math.PI) / numberOfSides;
+    const x = center[0] + radius * Math.cos(angle);
+    const y = center[1] + radius * Math.sin(angle);
+    vertices.push([x, y]);
+  }
+  
+  // Close the polygon by adding the first point again
+  vertices.push(vertices[0]);
+  
+  return new Polygon([vertices]);
+}
+
 // Enables drawing on the active layer
 export function enableDrawing(
   type: "Polygon" | "Circle" | "LineString" | "Point" | "Box"
@@ -400,25 +436,111 @@ export function enableDrawing(
     map.removeInteraction(doubleClickZoomInteraction);
   }
 
-  const activeLayer = getActiveLayer();
-  if (!activeLayer) {
+  // Check if there's an active layer before proceeding
+  const initialActiveLayer = getActiveLayer();
+  if (!initialActiveLayer) {
     alert("No active layer to draw on.");
     return;
   }
 
   drawInteraction = new Draw({
-    source: activeLayer.getSource() as VectorSource,
+    source: initialActiveLayer.getSource() as VectorSource,
     type: type === "Box" ? "Circle" : type,
     geometryFunction: type === "Box" ? createBox() : undefined,
   });
 
   drawInteraction.on("drawend", (event) => {
     const feature = event.feature;
+    const geometry = feature.getGeometry();
+
+    // Get the CURRENT active layer at drawing time, not the one from when button was clicked
+    const currentActiveLayer = getActiveLayer();
+    if (!currentActiveLayer) {
+      console.error("No active layer found when drawing completed");
+      return;
+    }
+
+    // Convert circles to polygons with many sides for better compatibility
+    // This ensures circles can be properly exported and modified
+    if (geometry instanceof Circle) {
+      const polygonGeometry = convertCircleToPolygon(geometry);
+      feature.setGeometry(polygonGeometry);
+      
+      // Force the map to refresh to show the updated geometry
+      map.render();
+      
+      // Use the CURRENT active layer's source, not the old one
+      const source = currentActiveLayer.getSource() as VectorSource;
+      if (source) {
+        source.changed();
+      }
+    }
 
     feature.setId("feature-" + generateUniqueId());
 
-    // Newly created features intentionally have no default properties
-    // (height, elevation, block, etc.).
+    // Set default elevation to 0 for newly created features
+    const featureGeometry = feature.getGeometry();
+    if (featureGeometry) {
+      try {
+        // For Point geometry
+        if (featureGeometry.getType() === 'Point') {
+          const pointGeom = featureGeometry as any;
+          const coords = pointGeom.getCoordinates();
+          if (coords && coords.length === 2) {
+            const newCoords = [coords[0], coords[1], 0];
+            pointGeom.setCoordinates(newCoords);
+          }
+        }
+        // For LineString geometry
+        else if (featureGeometry.getType() === 'LineString') {
+          const lineGeom = featureGeometry as any;
+          const coords = lineGeom.getCoordinates();
+          if (coords && coords.length > 0) {
+            const newCoords = coords.map((coord: any) => [coord[0], coord[1], 0]);
+            lineGeom.setCoordinates(newCoords);
+          }
+        }
+        // For Polygon geometry
+        else if (featureGeometry.getType() === 'Polygon') {
+          const polyGeom = featureGeometry as any;
+          const coords = polyGeom.getCoordinates();
+          if (coords && coords.length > 0) {
+            const newCoords = coords.map((ring: any) => 
+              ring.map((coord: any) => [coord[0], coord[1], 0])
+            );
+            polyGeom.setCoordinates(newCoords);
+          }
+        }
+        // For MultiPolygon geometry (from converted Circle)
+        else if (featureGeometry.getType() === 'MultiPolygon') {
+          const multiPolyGeom = featureGeometry as any;
+          const coords = multiPolyGeom.getCoordinates();
+          if (coords && coords.length > 0) {
+            const newCoords = coords.map((polygon: any) => 
+              polygon.map((ring: any) => 
+                ring.map((coord: any) => {
+                  if (coord && coord.length >= 2) {
+                    return [coord[0], coord[1], 0];
+                  }
+                  return coord;
+                })
+              )
+            );
+            multiPolyGeom.setCoordinates(newCoords);
+          }
+        }
+      } catch (error) {
+        console.warn('Error setting default elevation:', error);
+      }
+    }
+
+    // Add the feature to the CURRENT active layer, not the old one
+    const currentSource = currentActiveLayer.getSource() as VectorSource;
+    if (currentSource) {
+      currentSource.addFeature(feature);
+    }
+
+    // Newly created features now have default elevation of 0
 
     disableDrawing();
     setTimeout(() => {

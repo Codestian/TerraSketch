@@ -1,8 +1,7 @@
 export interface FeatureExport {
     shape: string;
-    coords: [number, number][];
-    elevationStart: number;
-    elevationEnd: number;
+    coords: [number, number, number][];
     height: number;
     block: string;
+    innerBlock: string;
 }

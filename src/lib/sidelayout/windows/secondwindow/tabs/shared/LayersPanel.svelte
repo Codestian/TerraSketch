@@ -22,9 +22,9 @@
   export let showImportProgress: boolean = false;
   export let importErrorMessage: string | null = null;
   export let blockName: string = "diamond_block";
-  export let elevationStartInput: string = "0";
-  export let elevationEndInput: string = "0";
-  export let elevationInput: string = "0";
+  export let elevationValue: string = "0";
+  export let onElevationChange: (value: string) => void = () => {};
+
   export let pendingImportFileName: string = "";
   export let pendingImportFileSize: number = 0;
   export let disabled: boolean = false;
@@ -284,20 +284,18 @@
       <label for="default-block">Default block</label>
       <input id="default-block" type="text" bind:value={blockName} disabled={disabled} />
     </div>
-    <div class="grid">
-      <div class="field">
-        <label for="line-start-elevation">Line start elevation</label>
-        <input id="line-start-elevation" type="number" bind:value={elevationStartInput} disabled={disabled} />
-      </div>
-      <div class="field">
-        <label for="line-end-elevation">Line end elevation</label>
-        <input id="line-end-elevation" type="number" bind:value={elevationEndInput} disabled={disabled} />
-      </div>
-      <div class="field">
-        <label for="other-shapes-elevation">Other shapes elevation</label>
-        <input id="other-shapes-elevation" type="number" bind:value={elevationInput} disabled={disabled} />
-      </div>
+    <div class="field">
+      <label for="default-elevation">Default elevation (for 2D coordinates)</label>
+      <input 
+        id="default-elevation" 
+        type="number" 
+        step="0.1" 
+        bind:value={elevationValue} 
+        on:input={() => onElevationChange(elevationValue)}
+        disabled={disabled} 
+      />
     </div>
+
     <div class="actions">
       <button class="cancel" on:click={onCloseImportConfirm}>Cancel</button>
       <button class="confirm" on:click={onConfirmImport} disabled={disabled}>Import</button>
