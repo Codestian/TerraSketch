@@ -2,14 +2,22 @@
   import { onMount } from "svelte";
   import { getMap, getVectorLayerContext } from "../../../../../utils/mapUtils";
   import {
-    createVectorLayer,
     removeVectorLayer,
     setActiveLayer,
     importGeoJSON,
     renameLayer,
+    DEFAULT_IMPORT_PROPERTY_ROWS,
+    type ImportPropertyRow,
   } from "../../../../../utils/vectorLayerUtils";
-  import { layers as layersStore, selectedLayerId as selectedLayerIdStore } from "../../../../../stores/layersStore";
+  import { layers as layersStore, selectedLayerId as selectedLayerIdStore, addEmptyVectorLayer } from "../../../../../stores/layersStore";
   import type { Layer } from "../../../../../stores/layersStore";
+  import {
+    pendingImportFile,
+    showImportConfirm,
+    openImportConfirm,
+    closeImportConfirm,
+  } from "../../../../../stores/geoImportConfirmStore";
+  import { get } from "svelte/store";
   import LayersPanel from "./shared/LayersPanel.svelte";
   import Modal from "../../../../common/Modal.svelte";
   import Button from "../../../../common/Button.svelte";
@@ -57,26 +65,47 @@
   let schematicOffsetX = 0;
   let schematicOffsetZ = 0;
   let selectedOffsetPreset = "Default";
+  let isInitialized = false; // Flag to prevent saving during initialization
+  let saveTimeout: ReturnType<typeof setTimeout> | null = null; // For debouncing saves
 
   // Load schematic settings from localStorage on component mount
   function loadSchematicSettings() {
     try {
       const savedSettings = localStorage.getItem('schematicSettings');
+      console.log('Raw localStorage data:', savedSettings);
+      
       if (savedSettings) {
         const settings = JSON.parse(savedSettings);
+        console.log('Parsed settings:', settings);
+        
         schematicVersion = settings.version || 2;
         schematicFillPolygons = settings.fillPolygons !== undefined ? settings.fillPolygons : false;
         schematicOffsetX = settings.offsetX || 0;
         schematicOffsetZ = settings.offsetZ || 0;
         selectedOffsetPreset = settings.offsetPreset || "Default";
+        
+        console.log('Applied schematic settings:', {
+          version: schematicVersion,
+          fillPolygons: schematicFillPolygons,
+          offsetX: schematicOffsetX,
+          offsetZ: schematicOffsetZ,
+          offsetPreset: selectedOffsetPreset
+        });
+      } else {
+        console.log('No saved schematic settings found, using defaults');
       }
     } catch (error) {
       console.warn('Failed to load schematic settings from localStorage:', error);
     }
+    // Mark as initialized after loading
+    isInitialized = true;
+    console.log('Schematic settings initialization complete');
   }
 
   // Save schematic settings to localStorage
   function saveSchematicSettings() {
+    if (!isInitialized) return; // Don't save during initialization
+    
     try {
       const settings = {
         version: schematicVersion,
@@ -86,9 +115,24 @@
         offsetPreset: selectedOffsetPreset
       };
       localStorage.setItem('schematicSettings', JSON.stringify(settings));
+      console.log('Saved schematic settings:', settings);
     } catch (error) {
       console.warn('Failed to save schematic settings to localStorage:', error);
     }
+  }
+
+  // Debounced save function to prevent multiple rapid saves
+  function debouncedSave() {
+    if (!isInitialized) return;
+    
+    if (saveTimeout) {
+      clearTimeout(saveTimeout);
+    }
+    
+    saveTimeout = setTimeout(() => {
+      saveSchematicSettings();
+      saveTimeout = null;
+    }, 100); // 100ms delay
   }
   
   // Offset presets
@@ -97,25 +141,14 @@
     { name: "ASEAN", offsetX: -13379008, offsetZ: 2727648 }
   ];
 
-  // Reactive statements to save settings when they change
-  $: if (schematicVersion !== undefined) {
-    saveSchematicSettings();
-  }
-
-  $: if (schematicFillPolygons !== undefined) {
-    saveSchematicSettings();
-  }
-
-  $: if (schematicOffsetX !== undefined) {
-    saveSchematicSettings();
-  }
-
-  $: if (schematicOffsetZ !== undefined) {
-    saveSchematicSettings();
-  }
-
-  $: if (selectedOffsetPreset !== undefined) {
-    saveSchematicSettings();
+  // Single reactive statement to save settings when any of them change (only after initialization)
+  $: if (isInitialized && 
+          schematicVersion !== undefined && 
+          schematicFillPolygons !== undefined && 
+          schematicOffsetX !== undefined && 
+          schematicOffsetZ !== undefined && 
+          selectedOffsetPreset !== undefined) {
+    debouncedSave();
   }
 
 
@@ -133,6 +166,7 @@
       schematicOffsetX = preset.offsetX;
       schematicOffsetZ = preset.offsetZ;
     }
+    // The reactive statement will handle saving automatically
   }
 
   function handleExport() {
@@ -419,47 +453,47 @@
   // New state for delete confirmation
   let showDeleteConfirm = false;
 
-  // New state for import confirmation and progress
-  let showImportConfirm = false;
+  // Import confirmation state is shared via geoImportConfirmStore (Layers tab + welcome modal)
   let showImportProgress = false;
-  let pendingImportFile: File | null = null;
   let importErrorMessage: string | null = null;
 
-  // Default values for import options
-  let blockName: string = "diamond_block";
-  let elevationValue: string = "0";
+  /** Default properties applied to each feature on GeoJSON import (key-value table in UI). */
+  let importPropertyRows: ImportPropertyRow[] = DEFAULT_IMPORT_PROPERTY_ROWS.map((r) => ({
+    ...r,
+  }));
+
+  function setImportPropertyRows(rows: ImportPropertyRow[]) {
+    importPropertyRows = rows;
+  }
+
+  /** Reset the import property table whenever the modal opens (not while editing). */
+  let prevShowImportConfirm = false;
+  $: {
+    if ($showImportConfirm && !prevShowImportConfirm) {
+      importPropertyRows = DEFAULT_IMPORT_PROPERTY_ROWS.map((r) => ({ ...r }));
+    }
+    prevShowImportConfirm = $showImportConfirm;
+  }
 
   // Consider files larger than 5MB as big
   const LARGE_FILE_BYTES = 5 * 1024 * 1024;
 
-  function openImportConfirm(file: File) {
-    pendingImportFile = file;
-    showImportConfirm = true;
-  }
-
-  function closeImportConfirm() {
-    showImportConfirm = false;
-    pendingImportFile = null;
-  }
-
-  function handleElevationChange(value: string) {
-    elevationValue = value;
-  }
-
   async function confirmImport() {
-    if (!pendingImportFile) return;
-    showImportConfirm = false;
+    const file = get(pendingImportFile);
+    if (!file) return;
+    showImportConfirm.set(false);
 
-    if (pendingImportFile.size > LARGE_FILE_BYTES) {
+    if (file.size > LARGE_FILE_BYTES) {
       showImportProgress = true;
     }
 
     try {
-      const importFileName = pendingImportFile?.name ?? "Imported.geojson";
-      await importGeoJSON(pendingImportFile, {
-        block: blockName || "diamond_block",
-        elevation: parseFloat(elevationValue) || 0,
-      }, getVectorLayerContext());
+      const importFileName = file?.name ?? "Imported.geojson";
+      await importGeoJSON(
+        file,
+        { propertyRows: importPropertyRows },
+        getVectorLayerContext()
+      );
       const newLayer = getMap()
         .getLayers()
         .getArray()
@@ -473,7 +507,7 @@
       importErrorMessage = `Error importing GeoJSON file: ${error}`;
     } finally {
       showImportProgress = false;
-      pendingImportFile = null;
+      pendingImportFile.set(null);
     }
   }
 
@@ -481,14 +515,7 @@
 
   // Function to add a new layer
   function addLayer() {
-    const name = newLayerName.trim() || `Layer ${$layersStore.length + 1}`;
-    const newLayer = createVectorLayer(name, getVectorLayerContext());
-    const newLayerId = newLayer.get("id");
-
-    layersStore.update(arr => [...arr, { id: newLayerId, name: name, visible: true }]);
-    setActiveLayer(newLayerId, getVectorLayerContext());
-    selectedLayerIdStore.set(newLayerId);
-
+    addEmptyVectorLayer(newLayerName);
     newLayerName = ""; // Clear the input field
   }
 
@@ -913,7 +940,6 @@
     overflow-y: auto;
     background-color: rgba(0, 0, 0, 0.3);
     border: 1px solid rgba(255, 255, 255, 0.2);
-    border-radius: 4px;
     padding: 12px;
   }
 
@@ -1041,15 +1067,14 @@
   {exportWidth}
   {exportHeight}
   {isOffsetEnabled}
-  {showImportConfirm}
+  showImportConfirm={$showImportConfirm}
   {showImportProgress}
   {importErrorMessage}
-  {blockName}
-  {elevationValue}
-  onElevationChange={handleElevationChange}
+  {importPropertyRows}
+  onImportPropertyRowsChange={setImportPropertyRows}
 
-  pendingImportFileName={pendingImportFile?.name ?? ""}
-  pendingImportFileSize={pendingImportFile?.size ?? 0}
+  pendingImportFileName={$pendingImportFile?.name ?? ""}
+  pendingImportFileSize={$pendingImportFile?.size ?? 0}
   onExportClick={onhandleExport}
   onSelectLayer={selectLayer}
   onToggleVisibility={(l, e) => toggleVisibility(l, e)}

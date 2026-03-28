@@ -10,6 +10,8 @@ import type { Extent } from "ol/extent";
 import { GeoJSON } from "ol/format"; // Import GeoJSON format for handling GeoJSON data
 import { Polygon, Circle } from "ol/geom";
 import type Geometry from "ol/geom/Geometry";
+import type SimpleGeometry from "ol/geom/SimpleGeometry";
+import type { SketchCoordType } from "ol/interaction/Draw";
 import { defaults as defaultInteractions, DragRotate } from "ol/interaction";
 import DoubleClickZoom from "ol/interaction/DoubleClickZoom";
 import PointerInteraction from "ol/interaction/Pointer";
@@ -32,6 +34,7 @@ import { showFeatureContextMenu, hideFeatureContextMenu } from "../stores/featur
 import TileLayer from "ol/layer/Tile";
 import { OSM, XYZ } from "ol/source";
 
+import * as turf from "@turf/turf";
 import { vectorLayers, activeLayerId, getActiveLayer } from "./vectorLayerUtils";
 import type { LayerContext } from "./vectorLayerUtils";
 import { storeLayers } from "./saveLayers";
@@ -43,12 +46,19 @@ export const hasSelectedFeatures = writable(false);
 
 export let map: OLMap;
 let drawInteraction: Draw | null = null;
+let freehandSelectDrawInteraction: Draw | null = null;
+let freehandSelectTempSource: VectorSource | null = null;
+let freehandEscapeHandler: ((e: KeyboardEvent) => void) | null = null;
+let freehandPointerUpHandler: (() => void) | null = null;
+let freehandDrawingInProgress = false;
 let selectInteraction: Select | null = null;
 let translateInteraction: Translate | null = null;
 let modifyInteraction: Modify | null = null;
 let doubleClickZoomInteraction: DoubleClickZoom | null = null;
 let rotatePointerInteraction: PointerInteraction | null = null;
 let mapMoveTimeout: number | null = null;
+
+export const isFreehandSelectionActive = writable(false);
 
 export const attributionText = writable("TerrasEdit");
 
@@ -232,14 +242,16 @@ function addRightClickListener(map: OLMap) {
   map.getViewport().addEventListener("contextmenu", (evt) => {
     evt.preventDefault();
 
-    // Check if a feature is under the cursor
+    // Check if a vector feature is under the cursor
     const pixel = map.getEventPixel(evt);
     let hitFeature: Feature<Geometry> | null = null;
 
+    // Only check for vector features, not image layers
     map.forEachFeatureAtPixel(
       pixel,
-      (feature: FeatureLike) => {
-        if (feature instanceof Feature) {
+      (feature: FeatureLike, layer) => {
+        // Only consider features from vector layers, not image layers
+        if (feature instanceof Feature && layer instanceof VectorLayer) {
           hitFeature = feature as Feature<Geometry>;
           return true;
         }
@@ -271,7 +283,7 @@ function addRightClickListener(map: OLMap) {
       return;
     }
 
-    // If no feature, show coordinates menu
+    // If no vector feature, show coordinates menu (this includes clicking on images)
     const coordinate = map.getEventCoordinate(evt);
     const [lon, lat] = toLonLat(coordinate);
 
@@ -354,7 +366,7 @@ export function initializeMap(target: HTMLElement) {
   });
 
   // Set map background color
-  map.getViewport().style.background = "rgb(22 24 24)";
+  map.getViewport().style.background = "rgb(10 12 12)";
 
   // Add listener for when map movement ends
   map.getView().on('change:center', () => {
@@ -425,9 +437,82 @@ function convertCircleToPolygon(circle: Circle): Polygon {
   return new Polygon([vertices]);
 }
 
+// Creates a custom geometry function for drawing ellipses
+function createEllipse() {
+  return function (coordinates: SketchCoordType, geometry: SimpleGeometry | undefined): SimpleGeometry {
+    if (coordinates.length < 2) {
+      return geometry || new Polygon([]);
+    }
+
+    // Get the current map rotation
+    const view = map.getView();
+    const rotation = view.getRotation();
+
+    // Extract coordinates properly from SketchCoordType
+    const center = coordinates[0] as [number, number];
+    const first = coordinates[1] as [number, number];
+    
+    // Calculate the vector from center to first point
+    const dx = first[0] - center[0];
+    const dy = first[1] - center[1];
+    const radiusX = Math.sqrt(dx * dx + dy * dy);
+    
+    // Calculate the angle of the first radius vector relative to the map rotation
+    const firstAngle = Math.atan2(dy, dx) - rotation;
+
+    let radiusY = radiusX;
+    let secondAngle = firstAngle + Math.PI / 2; // Default to perpendicular
+    
+    if (coordinates.length > 2) {
+      const second = coordinates[2] as [number, number];
+      const dx2 = second[0] - center[0];
+      const dy2 = second[1] - center[1];
+      radiusY = Math.sqrt(dx2 * dx2 + dy2 * dy2);
+      
+      // Calculate the angle of the second radius vector relative to the map rotation
+      secondAngle = Math.atan2(dy2, dx2) - rotation;
+    }
+
+    // Create ellipse as a polygon with many sides
+    const vertices: [number, number][] = [];
+    const numberOfSides = 64;
+    
+    for (let i = 0; i < numberOfSides; i++) {
+      const angle = (i * 2 * Math.PI) / numberOfSides;
+      
+      // Calculate the ellipse point in the ellipse's local coordinate system
+      const localX = radiusX * Math.cos(angle);
+      const localY = radiusY * Math.sin(angle);
+      
+      // Rotate the point to match the ellipse's orientation
+      const rotatedX = localX * Math.cos(firstAngle) - localY * Math.sin(firstAngle);
+      const rotatedY = localX * Math.sin(firstAngle) + localY * Math.cos(firstAngle);
+      
+      // Apply the map rotation to the rotated point
+      const finalX = center[0] + rotatedX * Math.cos(rotation) - rotatedY * Math.sin(rotation);
+      const finalY = center[1] + rotatedX * Math.sin(rotation) + rotatedY * Math.cos(rotation);
+      
+      vertices.push([finalX, finalY]);
+    }
+    
+    // Close the polygon by adding the first point again
+    vertices.push(vertices[0]);
+    
+    const ellipse = new Polygon([vertices]);
+    
+    if (!geometry) {
+      return ellipse;
+    } else {
+      // Cast to Polygon to access setCoordinates method
+      (geometry as Polygon).setCoordinates(ellipse.getCoordinates());
+      return geometry;
+    }
+  };
+}
+
 // Enables drawing on the active layer
 export function enableDrawing(
-  type: "Polygon" | "Circle" | "LineString" | "Point" | "Box"
+  type: "Polygon" | "Circle" | "LineString" | "Point" | "Box" | "Ellipse"
 ) {
   disableDrawing();
   disableFeatureSelection();
@@ -443,10 +528,12 @@ export function enableDrawing(
     return;
   }
 
+  // Use regular Draw interaction for all shapes, including ellipse
   drawInteraction = new Draw({
     source: initialActiveLayer.getSource() as VectorSource,
-    type: type === "Box" ? "Circle" : type,
-    geometryFunction: type === "Box" ? createBox() : undefined,
+    type: type === "Box" ? "Circle" : type === "Ellipse" ? "LineString" : type,
+    geometryFunction: type === "Box" ? createBox() : type === "Ellipse" ? createEllipse() : undefined,
+    maxPoints: type === "Ellipse" ? 3 : undefined, // Allow up to 3 points for ellipse (center, radiusX, radiusY)
   });
 
   drawInteraction.on("drawend", (event) => {
@@ -559,6 +646,160 @@ export function disableDrawing() {
   if (drawInteraction) {
     map.removeInteraction(drawInteraction);
     drawInteraction = null;
+  }
+}
+
+// Style for the freehand selection polygon while drawing
+const freehandSelectDrawStyle = new Style({
+  stroke: new Stroke({
+    color: "rgba(0, 150, 255, 0.8)",
+    width: 2,
+  }),
+  fill: new Fill({
+    color: "rgba(0, 150, 255, 0.15)",
+  }),
+});
+
+function cleanupFreehandSelection(selectIntersectingFeatures: Feature[] | null) {
+  if (!freehandSelectDrawInteraction) return;
+
+  map.removeInteraction(freehandSelectDrawInteraction);
+  freehandSelectDrawInteraction = null;
+  if (freehandSelectTempSource) {
+    freehandSelectTempSource.clear();
+    freehandSelectTempSource = null;
+  }
+
+  // Re-enable all map interactions (pan, zoom, rotate, etc.)
+  map.getInteractions().getArray().forEach((interaction) => {
+    interaction.setActive(true);
+  });
+
+  // Re-add selection and related interactions
+  if (selectInteraction) {
+    map.addInteraction(selectInteraction);
+    if (selectIntersectingFeatures !== null) {
+      selectInteraction.getFeatures().clear();
+      selectIntersectingFeatures.forEach((f) =>
+        selectInteraction!.getFeatures().push(f)
+      );
+      selectionChangeCallback(selectInteraction.getFeatures());
+      hasSelectedFeatures.set(selectInteraction.getFeatures().getLength() > 0);
+      selectedFeature.set(selectInteraction.getFeatures().getArray()[0] || null);
+    }
+  }
+  if (translateInteraction) map.addInteraction(translateInteraction);
+  if (modifyInteraction) map.addInteraction(modifyInteraction);
+  if (doubleClickZoomInteraction) map.addInteraction(doubleClickZoomInteraction);
+  ensureRotateInteractionOnTop();
+
+  if (freehandEscapeHandler) {
+    window.removeEventListener("keydown", freehandEscapeHandler);
+    freehandEscapeHandler = null;
+  }
+  if (freehandPointerUpHandler) {
+    const viewport = map.getViewport();
+    viewport.removeEventListener("pointerup", freehandPointerUpHandler as EventListener, true);
+    freehandPointerUpHandler = null;
+  }
+  freehandDrawingInProgress = false;
+  isFreehandSelectionActive.set(false);
+}
+
+/**
+ * Enables freehand selection: draw a polygon on the map to select all features
+ * that intersect it. Pan, zoom and rotate are disabled while drawing.
+ */
+export function enableFreehandSelection() {
+  if (freehandSelectDrawInteraction) return;
+
+  const activeLayer = getActiveLayer();
+  if (!activeLayer) {
+    return;
+  }
+
+  // Remove select/translate/modify so they don't capture events during draw
+  if (selectInteraction) map.removeInteraction(selectInteraction);
+  if (translateInteraction) map.removeInteraction(translateInteraction);
+  if (modifyInteraction) map.removeInteraction(modifyInteraction);
+  if (doubleClickZoomInteraction) map.removeInteraction(doubleClickZoomInteraction);
+
+  freehandSelectTempSource = new VectorSource();
+  freehandSelectDrawInteraction = new Draw({
+    source: freehandSelectTempSource,
+    type: "Polygon",
+    freehand: true,
+    style: freehandSelectDrawStyle,
+  });
+
+  freehandSelectDrawInteraction.on("drawstart", () => {
+    freehandDrawingInProgress = true;
+  });
+
+  freehandSelectDrawInteraction.on("drawend", (event) => {
+    freehandDrawingInProgress = false;
+    const drawnFeature = event.feature;
+    const polygon = drawnFeature.getGeometry();
+    if (!polygon || !(polygon instanceof Polygon)) {
+      cleanupFreehandSelection(null);
+      return;
+    }
+
+    const source = activeLayer.getSource();
+    if (!source) {
+      cleanupFreehandSelection(null);
+      return;
+    }
+    const format = new GeoJSON();
+    const polygonGeo = format.writeGeometryObject(polygon);
+    const candidates = source.getFeatures();
+    const selected = candidates.filter((f) => {
+      const g = f.getGeometry();
+      if (!g) return false;
+      try {
+        const featureGeo = format.writeGeometryObject(g);
+        return turf.booleanIntersects(polygonGeo as turf.helpers.Geometry, featureGeo as turf.helpers.Geometry);
+      } catch {
+        return false;
+      }
+    });
+
+    cleanupFreehandSelection(selected);
+  });
+
+  // Finish freehand polygon on pointer up. Use capture phase so we run before Draw's handleUpEvent
+  // (which would otherwise call abortDrawing() when shouldHandle_ is false).
+  freehandPointerUpHandler = () => {
+    if (freehandSelectDrawInteraction) {
+      freehandSelectDrawInteraction.finishDrawing();
+    }
+  };
+  map.getViewport().addEventListener("pointerup", freehandPointerUpHandler as EventListener, true);
+
+  map.addInteraction(freehandSelectDrawInteraction);
+
+  // Disable pan, zoom, rotate during freehand draw
+  map.getInteractions().getArray().forEach((interaction) => {
+    if (interaction !== freehandSelectDrawInteraction) {
+      interaction.setActive(false);
+    }
+  });
+
+  freehandEscapeHandler = (e: KeyboardEvent) => {
+    if (e.key === "Escape") {
+      cleanupFreehandSelection(null);
+    }
+  };
+  window.addEventListener("keydown", freehandEscapeHandler);
+  isFreehandSelectionActive.set(true);
+}
+
+/**
+ * Disables freehand selection and restores map interactions.
+ */
+export function disableFreehandSelection() {
+  if (freehandSelectDrawInteraction) {
+    cleanupFreehandSelection(null);
   }
 }
 

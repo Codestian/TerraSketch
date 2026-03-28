@@ -1,7 +1,7 @@
-import { writable } from "svelte/store";
+import { get, writable } from "svelte/store";
 import { map, mapReady, getVectorLayerContext } from "../utils/mapUtils";
-import { vectorLayers, setActiveLayer, activeLayerId } from "../utils/vectorLayerUtils";
-import { retrieveAllVectorLayers } from "../utils/saveLayers";
+import { vectorLayers, setActiveLayer, activeLayerId, createVectorLayer } from "../utils/vectorLayerUtils";
+import { retrieveAllVectorLayers, storeLayers } from "../utils/saveLayers";
 import type VectorLayer from "ol/layer/Vector";
 import type VectorSource from "ol/source/Vector";
 
@@ -13,14 +13,37 @@ export interface Layer {
 
 export const layers = writable<Layer[]>([]);
 export const selectedLayerId = writable<string | null>(null);
+/** True after `initLayersFromDBOnce` finishes (success or empty DB). */
+export const vectorLayersHydrated = writable(false);
 
 let initialized = false;
 
+/** Create a new empty vector layer and register it in UI stores (used by Layers tab and welcome modal). */
+export function addEmptyVectorLayer(nameInput?: string): string {
+  const ctx = getVectorLayerContext();
+  const trimmed = (nameInput ?? "").trim();
+  const layerName = trimmed || `Layer ${get(layers).length + 1}`;
+  const newLayer = createVectorLayer(layerName, ctx);
+  const newLayerId = newLayer.get("id") as string;
+  layers.update((arr) => [...arr, { id: newLayerId, name: layerName, visible: true }]);
+  setActiveLayer(newLayerId, ctx);
+  selectedLayerId.set(newLayerId);
+  storeLayers(true);
+  return newLayerId;
+}
+
 export async function initLayersFromDBOnce() {
-  if (initialized) return;
+  if (initialized) {
+    vectorLayersHydrated.set(true);
+    return;
+  }
 
   await mapReady;
-  if (!map) return; // Map not ready; bail out silently
+  if (!map) {
+    vectorLayersHydrated.set(true);
+    initialized = true;
+    return;
+  }
 
   try {
     const list = await retrieveAllVectorLayers();
@@ -78,6 +101,8 @@ export async function initLayersFromDBOnce() {
   } catch {
     // No layers found or DB not available; keep empty state
     initialized = true;
+  } finally {
+    vectorLayersHydrated.set(true);
   }
 }
 

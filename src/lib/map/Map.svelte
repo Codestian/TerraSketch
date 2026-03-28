@@ -41,7 +41,7 @@
             </tr>
             <tr>
               <td class="key">Alt + W/S</td>
-              <td class="description">Scale active image</td>
+              <td class="description">Scale active image (zoom-based)</td>
             </tr>
             <tr>
               <td class="key">Left🖱️</td>

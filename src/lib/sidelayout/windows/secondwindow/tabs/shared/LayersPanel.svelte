@@ -1,6 +1,8 @@
 <script lang="ts">
+  import "@fortawesome/fontawesome-free/css/all.css";
   import WindowButton from "$lib/common/WindowButton.svelte";
   import Modal from "$lib/common/Modal.svelte";
+  import type { ImportPropertyRow } from "../../../../../../utils/vectorLayerUtils";
 
   interface Layer {
     id: string;
@@ -21,9 +23,8 @@
   export let showImportConfirm: boolean = false;
   export let showImportProgress: boolean = false;
   export let importErrorMessage: string | null = null;
-  export let blockName: string = "diamond_block";
-  export let elevationValue: string = "0";
-  export let onElevationChange: (value: string) => void = () => {};
+  export let importPropertyRows: ImportPropertyRow[] = [];
+  export let onImportPropertyRowsChange: (rows: ImportPropertyRow[]) => void = () => {};
 
   export let pendingImportFileName: string = "";
   export let pendingImportFileSize: number = 0;
@@ -72,6 +73,30 @@
   }
 
   let dragIndex: number | null = null;
+
+  function updateImportRow(index: number, field: "key" | "value", value: string) {
+    onImportPropertyRowsChange(
+      importPropertyRows.map((r, i) => (i === index ? { ...r, [field]: value } : r))
+    );
+  }
+
+  function addImportPropertyRow() {
+    onImportPropertyRowsChange([...importPropertyRows, { key: "", value: "" }]);
+  }
+
+  function removeImportPropertyRow(index: number) {
+    onImportPropertyRowsChange(importPropertyRows.filter((_, i) => i !== index));
+  }
+
+  function onImportKeyInput(index: number, e: Event) {
+    const v = (e.currentTarget as HTMLInputElement).value;
+    updateImportRow(index, "key", v);
+  }
+
+  function onImportValueInput(index: number, e: Event) {
+    const v = (e.currentTarget as HTMLInputElement).value;
+    updateImportRow(index, "value", v);
+  }
 </script>
 
 <div class="layers-manager">
@@ -275,49 +300,112 @@
 {#if showImportButton}
 <Modal title="Import GeoJSON" show={showImportConfirm} on:close={onCloseImportConfirm}>
   <div class="import-confirm">
-    <p>Do you want to import the file:</p>
-    <p class="filename">{pendingImportFileName}</p>
-    <p class="filesize">
-      Size: {pendingImportFileSize ? (pendingImportFileSize / (1024 * 1024)).toFixed(2) : '0'} MB
-    </p>
-    <div class="field">
-      <label for="default-block">Default block</label>
-      <input id="default-block" type="text" bind:value={blockName} disabled={disabled} />
+    <p class="import-lead">This file will be added as a new layer.</p>
+    <div class="import-file-card">
+      <div class="import-file-icon" aria-hidden="true">
+        <i class="fas fa-file-code"></i>
+      </div>
+      <div class="import-file-meta">
+        <span class="filename">{pendingImportFileName}</span>
+        <span class="filesize">
+          {pendingImportFileSize >= 1024 * 1024
+            ? `${(pendingImportFileSize / (1024 * 1024)).toFixed(2)} MB`
+            : pendingImportFileSize
+              ? `${(pendingImportFileSize / 1024).toFixed(1)} KB`
+              : "0 B"}
+        </span>
+      </div>
     </div>
-    <div class="field">
-      <label for="default-elevation">Default elevation (for 2D coordinates)</label>
-      <input 
-        id="default-elevation" 
-        type="number" 
-        step="0.1" 
-        bind:value={elevationValue} 
-        on:input={() => onElevationChange(elevationValue)}
-        disabled={disabled} 
-      />
+    <div class="import-fields">
+      <p class="import-fields-heading">Default properties (each imported feature)</p>
+      <p class="import-fields-hint">
+        Keys are stored on features. <code>elevation</code> also sets Z when coordinates are 2D.
+      </p>
+      <table class="import-kv-table">
+        <thead>
+          <tr>
+            <th class="import-kv-key">Key</th>
+            <th class="import-kv-value">Value</th>
+            <th class="import-kv-remove" aria-hidden="true"></th>
+          </tr>
+        </thead>
+        <tbody>
+          {#each importPropertyRows as row, i (i)}
+            <tr>
+              <td>
+                <input
+                  type="text"
+                  class="import-kv-input"
+                  placeholder="property name"
+                  value={row.key}
+                  disabled={disabled}
+                  on:input={(e) => onImportKeyInput(i, e)}
+                />
+              </td>
+              <td>
+                <input
+                  type="text"
+                  class="import-kv-input"
+                  placeholder="value"
+                  value={row.value}
+                  disabled={disabled}
+                  on:input={(e) => onImportValueInput(i, e)}
+                />
+              </td>
+              <td class="import-kv-remove">
+                <button
+                  type="button"
+                  class="import-kv-remove-btn"
+                  disabled={disabled}
+                  aria-label="Remove row"
+                  title="Remove row"
+                  on:click={() => removeImportPropertyRow(i)}
+                >
+                  <i class="fas fa-trash-can" aria-hidden="true"></i>
+                </button>
+              </td>
+            </tr>
+          {/each}
+        </tbody>
+      </table>
+      <button
+        type="button"
+        class="import-kv-add"
+        disabled={disabled}
+        on:click={addImportPropertyRow}
+      >
+        <i class="fas fa-plus" aria-hidden="true"></i>
+        Add property
+      </button>
     </div>
-
-    <div class="actions">
-      <button class="cancel" on:click={onCloseImportConfirm}>Cancel</button>
-      <button class="confirm" on:click={onConfirmImport} disabled={disabled}>Import</button>
+    <div class="import-actions">
+      <button type="button" class="import-btn import-btn-secondary" on:click={onCloseImportConfirm}>
+        Cancel
+      </button>
+      <button type="button" class="import-btn import-btn-primary" on:click={onConfirmImport} disabled={disabled}>
+        Import
+      </button>
     </div>
   </div>
 </Modal>
 
-<Modal title="Importing..." show={showImportProgress} on:close={() => {}}>
+<Modal title="Importing…" show={showImportProgress} on:close={() => {}}>
   <div class="import-progress">
     <div class="progress-bar">
       <div class="progress-bar-fill"></div>
     </div>
-    <p>Please wait while the file is being imported.</p>
+    <p class="import-progress-text">Importing GeoJSON…</p>
   </div>
 </Modal>
 
 {#if importErrorMessage}
-  <Modal title="Import Error" show={true} on:close={onCloseImportError}>
+  <Modal title="Import error" show={true} on:close={onCloseImportError}>
     <div class="import-error">
-      <p>{importErrorMessage}</p>
-      <div class="actions">
-        <button class="confirm" on:click={onCloseImportError}>Close</button>
+      <p class="import-error-msg">{importErrorMessage}</p>
+      <div class="import-actions import-actions-single">
+        <button type="button" class="import-btn import-btn-primary" on:click={onCloseImportError}>
+          Close
+        </button>
       </div>
     </div>
   </Modal>
@@ -651,70 +739,325 @@
     }
   }
 
+  /* Import GeoJSON / progress / error — aligned with app modal + panel palette (rgb(23,25,26), rgba panels, green accent) */
   .import-confirm {
-    .field {
-      display: flex;
-      flex-direction: column;
-      gap: 4px;
-      margin-top: 6px;
+    padding: 16px;
+    color: #eaeaea;
+    font-size: 0.8rem;
+    line-height: 1.4;
+  }
+
+  .import-lead {
+    margin: 0 0 12px;
+    color: rgba(255, 255, 255, 0.75);
+    font-size: 0.7rem;
+    letter-spacing: 0.5px;
+  }
+
+  .import-file-card {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px;
+    margin-bottom: 16px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+  }
+
+  .import-file-icon {
+    flex-shrink: 0;
+    width: 40px;
+    height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    color: rgba(255, 255, 255, 0.85);
+
+    i {
+      font-size: 1.1rem;
     }
-    .grid {
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-      margin-top: 6px;
+  }
+
+  .import-file-meta {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+  }
+
+  .import-confirm .filename {
+    font-size: 0.75rem;
+    font-weight: 600;
+    word-break: break-all;
+    color: #fff;
+  }
+
+  .import-confirm .filesize {
+    font-size: 0.65rem;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.45);
+  }
+
+  .import-fields {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .import-fields-heading {
+    margin: 0;
+    font-size: 0.65rem;
+    font-weight: bold;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.55);
+  }
+
+  .import-fields-hint {
+    margin: -4px 0 4px;
+    font-size: 0.65rem;
+    line-height: 1.35;
+    color: rgba(255, 255, 255, 0.45);
+
+    code {
+      font-size: 0.7rem;
+      color: rgba(255, 255, 255, 0.65);
     }
-    input[type="text"], input[type="number"] {
-      padding: 6px;
-      color: white;
-      background: rgba(0, 0, 0, 0.4);
-      border: 1px solid rgba(255, 255, 255, 0.1);
+  }
+
+  .import-kv-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.75rem;
+
+    th {
+      text-align: left;
+      padding: 6px 8px 8px 0;
+      font-size: 0.6rem;
+      font-weight: bold;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      color: rgba(255, 255, 255, 0.45);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    td {
+      padding: 6px 8px 6px 0;
+      vertical-align: middle;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    }
+
+    tr:last-child td {
+      border-bottom: none;
+    }
+  }
+
+  .import-kv-key {
+    width: 38%;
+  }
+
+  .import-kv-value {
+    width: auto;
+  }
+
+  .import-kv-remove {
+    width: 36px;
+    padding-right: 0;
+    text-align: right;
+  }
+
+  .import-kv-input {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 8px 10px;
+    color: #fff;
+    background: rgba(0, 0, 0, 0.35);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    font-size: 0.8rem;
+    outline: none;
+    transition: border-color 0.2s ease, background 0.2s ease;
+
+    &:focus {
+      border-color: green;
+      background: rgba(0, 0, 0, 0.45);
+    }
+
+    &:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+  }
+
+  .import-kv-remove-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border: none;
+    background: rgb(201, 29, 29);
+    color: #fff;
+    cursor: pointer;
+    transition: background-color 0.2s ease;
+
+    &:hover:not(:disabled) {
+      background: darkred;
+    }
+
+    &:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+    }
+
+    i {
+      font-size: 0.75rem;
+    }
+  }
+
+  .import-kv-add {
+    align-self: flex-start;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 4px;
+    padding: 8px 12px;
+    font-size: 0.65rem;
+    font-weight: bold;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    cursor: pointer;
+    color: #fff;
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    transition: background-color 0.2s ease;
+
+    &:hover:not(:disabled) {
+      background: rgba(255, 255, 255, 0.18);
+    }
+
+    &:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+    }
+
+    i {
+      font-size: 0.7rem;
+    }
+  }
+
+  .import-actions {
+    display: flex;
+    flex-direction: row;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 20px;
+    padding-top: 4px;
+  }
+
+  .import-actions-single {
+    justify-content: flex-end;
+    margin-top: 16px;
+  }
+
+  .import-btn {
+    cursor: pointer;
+    padding: 8px 16px;
+    font-size: 0.65rem;
+    font-weight: bold;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    border: none;
+    transition: background-color 0.2s ease, opacity 0.2s ease;
+  }
+
+  .import-btn-secondary {
+    background: rgba(255, 255, 255, 0.1);
+    color: #fff;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+
+    &:hover {
+      background: rgba(255, 255, 255, 0.18);
+    }
+  }
+
+  .import-btn-primary {
+    background-color: green;
+    color: #fff;
+    border-top: 3px solid rgba(255, 255, 255, 0.1);
+    border-left: 3px solid rgba(255, 255, 255, 0.1);
+    border-bottom: 3px solid rgba(0, 0, 0, 0.3);
+    border-right: 3px solid rgba(0, 0, 0, 0.3);
+
+    &:hover:not(:disabled) {
+      background-color: rgb(0, 83, 0);
+    }
+
+    &:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
     }
   }
 
   .import-progress {
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: 16px;
+    padding: 16px;
+    color: #eaeaea;
+  }
 
-    .progress-bar {
-      position: relative;
-      width: 100%;
-      height: 10px;
-      background: rgba(255, 255, 255, 0.1);
-      overflow: hidden;
-      border: 1px solid rgba(255, 255, 255, 0.2);
+  .import-progress-text {
+    margin: 0;
+    font-size: 0.75rem;
+    letter-spacing: 0.5px;
+    color: rgba(255, 255, 255, 0.7);
+    text-align: center;
+  }
 
-      .progress-bar-fill {
-        position: absolute;
-        left: -40%;
-        width: 40%;
-        height: 100%;
-        background: green;
-        animation: progress-indeterminate 1s linear infinite;
-      }
+  .import-progress .progress-bar {
+    position: relative;
+    width: 100%;
+    height: 8px;
+    background: rgba(255, 255, 255, 0.08);
+    overflow: hidden;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+
+    .progress-bar-fill {
+      position: absolute;
+      left: -40%;
+      width: 40%;
+      height: 100%;
+      background: linear-gradient(90deg, rgb(0, 100, 0), green);
+      animation: progress-indeterminate 1s linear infinite;
     }
+  }
 
-    @keyframes progress-indeterminate {
-      0% { left: -40%; }
-      100% { left: 100%; }
+  @keyframes progress-indeterminate {
+    0% {
+      left: -40%;
+    }
+    100% {
+      left: 100%;
     }
   }
 
   .import-error {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
+    padding: 16px;
+    color: #eaeaea;
+  }
 
-    .actions {
-      display: flex;
-      justify-content: flex-end;
-
-      .confirm {
-        background: green;
-        color: white;
-      }
-    }
+  .import-error-msg {
+    margin: 0 0 8px;
+    font-size: 0.8rem;
+    line-height: 1.45;
+    color: rgba(255, 200, 200, 0.95);
+    padding: 12px;
+    background: rgba(201, 29, 29, 0.15);
+    border: 1px solid rgba(255, 100, 100, 0.2);
   }
 
   .opacity-control {
@@ -725,7 +1068,6 @@
     padding: 8px;
     background: rgba(255, 255, 255, 0.05);
     border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 4px;
     color: white;
     font-size: 0.7rem;
     font-weight: bold;
@@ -740,7 +1082,6 @@
       width: 100%;
       height: 8px;
       background: rgba(255, 255, 255, 0.2);
-      border-radius: 4px;
       outline: none;
       cursor: pointer;
 
@@ -750,7 +1091,6 @@
         width: 20px;
         height: 20px;
         background: green;
-        border-radius: 50%;
         margin-top: -6px;
         box-shadow: 0 0 2px rgba(0, 0, 0, 0.2);
       }
@@ -759,7 +1099,6 @@
         width: 20px;
         height: 20px;
         background: green;
-        border-radius: 50%;
         box-shadow: 0 0 2px rgba(0, 0, 0, 0.2);
       }
     }

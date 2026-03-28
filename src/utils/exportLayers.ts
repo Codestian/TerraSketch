@@ -679,8 +679,8 @@ export function convertGeoJSONToKML(geojson: any): string {
   let kml = `<?xml version="1.0" encoding="UTF-8"?>
 <kml xmlns="http://www.opengis.net/kml/2.2">
   <Document>
-    <name>Exported from TerraSketch</name>
-    <description>Layer exported from TerraSketch application</description>`;
+    <name>Exported from TerrasEdit</name>
+    <description>Layer exported from TerrasEdit</description>`;
 
   if (geojson.features && Array.isArray(geojson.features)) {
     geojson.features.forEach((feature: any, index: number) => {

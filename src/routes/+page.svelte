@@ -3,6 +3,7 @@
 	import Sidebar from '$lib/sidebar/Sidebar.svelte';
 	import Map from '$lib/map/Map.svelte';
 	import SideLayout from '$lib/sidelayout/SideLayout.svelte';
+	import WelcomeLayersModal from '$lib/welcome/WelcomeLayersModal.svelte';
 </script>
 
 <svelte:head>
@@ -13,7 +14,8 @@
 <main>
 	<Sidebar />
 	<Map />
-	<SideLayout /> 
+	<SideLayout />
+	<WelcomeLayersModal />
 </main>
 
 <style lang="scss">

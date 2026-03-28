@@ -44,7 +44,14 @@ export function createMapLayer(name: string, ctx: mapLayerContext, options: Crea
 
   mapLayers[mapLayerId] = newMapLayer;
 
-  ctx.map.getLayers().insertAt(0, newMapLayer);
+  // Stack new XYZ tiles above existing tile layers (higher index = drawn on top).
+  // insertAt(0) would put each new layer at the bottom, inverting visual order vs the UI list.
+  const stack = ctx.map.getLayers().getArray();
+  let lastTileIdx = -1;
+  stack.forEach((l, i) => {
+    if (l instanceof TileLayer) lastTileIdx = i;
+  });
+  ctx.map.getLayers().insertAt(lastTileIdx + 1, newMapLayer);
 
   // Auto-save the new layer to storage
   import("./saveLayers").then(({ storeMapLayer, storeMapLayerOrder }) => {

@@ -21,7 +21,6 @@
             width: 32px;
             height: 2px;
             background: white;
-            border-radius: 32px;
         }
     }
 </style>

@@ -119,10 +119,24 @@ export function scaleActiveImageLayer(factor: number) {
   if (!layer) return;
   const src = layer.getSource() as GeoImageSource | null;
   if (!src) return;
+  
+  // Get current map zoom level to adjust scaling
+  const map = getMap();
+  if (!map) return;
+  const view = map.getView();
+  const currentZoom = view.getZoom() || 1;
+  
+  // Calculate zoom-based scaling factor
+  // Higher zoom levels (closer view) result in smaller scaling steps
+  // Base zoom level of 3 is used as reference point
+  const baseZoom = 3;
+  const zoomFactor = Math.pow(0.8, currentZoom - baseZoom);
+  const adjustedFactor = Math.pow(factor, zoomFactor);
+  
   const current = src.getScale() as number[] | number;
   const [sx, sy] = Array.isArray(current) ? current : [current, current];
-  const nx = Math.max(0.01, sx * factor);
-  const ny = Math.max(0.01, sy * factor);
+  const nx = Math.max(0.01, sx * adjustedFactor);
+  const ny = Math.max(0.01, sy * adjustedFactor);
   src.setScale([nx, ny]);
   
   // Debounced auto-save after scaling
@@ -135,8 +149,22 @@ export function rotateActiveImageLayer(deltaDeg: number) {
   if (!layer) return;
   const src = layer.getSource() as GeoImageSource | null;
   if (!src) return;
+  
+  // Get current map zoom level to adjust rotation sensitivity
+  const map = getMap();
+  if (!map) return;
+  const view = map.getView();
+  const currentZoom = view.getZoom() || 1;
+  
+  // Calculate zoom-based rotation factor
+  // Higher zoom levels (closer view) result in smaller rotation steps
+  // Base zoom level of 3 is used as reference point
+  const baseZoom = 3;
+  const zoomFactor = Math.pow(0.8, currentZoom - baseZoom);
+  const adjustedDeltaDeg = deltaDeg * zoomFactor;
+  
   const current = src.getRotation();
-  const deltaRad = (deltaDeg * Math.PI) / 180;
+  const deltaRad = (adjustedDeltaDeg * Math.PI) / 180;
   src.setRotation(current + deltaRad);
   
   // Debounced auto-save after rotating

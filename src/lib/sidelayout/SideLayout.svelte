@@ -121,7 +121,6 @@
       height: 32px;
       width: 2px;
       background: white;
-      border-radius: 32px;
     }
   }
 

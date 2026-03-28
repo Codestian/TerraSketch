@@ -11,19 +11,26 @@
     export let danger: boolean = false; // Prop for danger style
     export let bordered: boolean = false; // New prop for bordered style
     export let flexGrow: boolean = false; // New prop for flex grow
+    export let tooltip: string = ""; // Tooltip text shown on hover/focus
 </script>
 
 <button 
     class="btn {secondary ? 'secondary' : ''} {danger ? 'danger' : ''} {bordered ? 'bordered' : ''}" 
     style="width: {flexGrow ? 'auto' : width}; flex-grow: {flexGrow ? 1 : 0}; height: {height};" 
     on:click={onClick}
+    aria-label={tooltip || label}
 >
     <i class={iconClass}></i>
     {label}
+    {#if tooltip}
+        <span class="tooltip">{tooltip}</span>
+    {/if}
 </button>
 
 <style lang="scss">
     .btn {
+        position: relative;
+        overflow: visible;
         display: flex;
         align-items: center;
         justify-content: center;
@@ -67,6 +74,30 @@
 
         &.bordered {
             border: 2px solid white; // Adds white border
+        }
+
+        .tooltip {
+            position: absolute;
+            left: calc(100% + 8px);
+            top: 50%;
+            transform: translateY(-50%) translateX(-4px);
+            opacity: 0;
+            pointer-events: none;
+            white-space: nowrap;
+            background: rgb(23, 25, 26);
+            color: white;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            padding: 6px 8px;
+            font-size: 0.68rem;
+            letter-spacing: 0.5px;
+            z-index: 3000;
+            transition: opacity 0.15s ease, transform 0.15s ease;
+        }
+
+        &:hover .tooltip,
+        &:focus-visible .tooltip {
+            opacity: 1;
+            transform: translateY(-50%) translateX(0);
         }
     }
 </style>

@@ -649,9 +649,9 @@
         }
         
         &.active {
-          background: rgba(0, 122, 204, 0.2);
-          color: #007acc;
-          border-bottom: 2px solid #007acc;
+          background: rgba(0, 128, 0, 0.22);
+          color: #fff;
+          border-bottom: 2px solid green;
         }
       }
     }
@@ -767,7 +767,7 @@
           
           &:focus {
             outline: none;
-            border-color: #007acc;
+            border-color: green;
           }
           
           &:hover {
@@ -776,7 +776,7 @@
         }
         
         .elevation-btn {
-          background: #007acc;
+          background: green;
           border: none;
           color: white;
           padding: 6px 12px;
@@ -785,7 +785,7 @@
           transition: background-color 0.3s ease;
           
           &:hover {
-            background: #005a9e;
+            background: rgb(0, 83, 0);
           }
           
           &:disabled {
@@ -830,7 +830,7 @@
 
             &:focus {
               outline: none;
-              border-color: #007acc;
+              border-color: green;
             }
 
             &:hover {
@@ -894,7 +894,7 @@
 
             &:focus {
               outline: none;
-              border-color: #007acc;
+              border-color: green;
             }
 
             &:hover {
@@ -921,7 +921,7 @@
             margin-right: 12px; // Align with delete button
 
             &:hover {
-              background: #388e3c;
+              background: rgb(0, 83, 0);
             }
 
             &:disabled {

@@ -11,10 +11,31 @@ import { generateUniqueId } from "./mapUtils";
 export let vectorLayers: { [key: string]: VectorLayer<VectorSource> } = {};
 export let activeLayerId: string | null = null;
 
+/** One row in the import GeoJSON default properties table (key → value per feature). */
+export type ImportPropertyRow = { key: string; value: string };
+
+/** Default rows whenever the import GeoJSON modal opens. */
+export const DEFAULT_IMPORT_PROPERTY_ROWS: ImportPropertyRow[] = [
+  { key: "block", value: "diamond_block" },
+  { key: "elevation", value: "0" },
+];
+
 export type ImportOptions = {
-  block: string;
-  elevation?: number;
+  /** Applied to every imported feature. Row with key `elevation` (case-insensitive) also sets default Z on 2D coordinates. */
+  propertyRows: ImportPropertyRow[];
 };
+
+function parseImportPropertyValue(raw: string): string | number | boolean {
+  const trimmed = raw.trim();
+  if (trimmed === "true") return true;
+  if (trimmed === "false") return false;
+  if (trimmed === "") return "";
+  if (/^[-+]?(?:\d+\.?\d*|\d*\.\d+)(?:[eE][-+]?\d+)?$/.test(trimmed)) {
+    const n = parseFloat(trimmed);
+    if (!Number.isNaN(n)) return n;
+  }
+  return raw;
+}
 
 export type LayerContext = {
   map: OLMap;
@@ -125,17 +146,24 @@ export function importGeoJSON(
         featureProjection: ctx.map.getView().getProjection(),
       });
 
-      const { block, elevation = 0 } = options;
-      
-      console.log('Importing GeoJSON with options:', { block, elevation });
+      const rows = (options.propertyRows || []).filter((r) => r.key.trim().length > 0);
+      const elevRow = rows.find((r) => r.key.trim().toLowerCase() === "elevation");
+      const elevation = elevRow ? parseFloat(elevRow.value) : 0;
+      const elev = Number.isFinite(elevation) ? elevation : 0;
+
+      console.log("Importing GeoJSON with options:", { propertyRows: rows, elevation: elev });
       console.log('Number of features to process:', features.length);
       console.log('Map projection:', ctx.map.getView().getProjection().getCode());
 
       features.forEach((feature: Feature, index: number) => {
-        feature.set("block", block);
-        
-        // Apply elevation to 2D coordinates if elevation is provided
-        if (elevation !== 0) {
+        rows.forEach((row) => {
+          const k = row.key.trim();
+          if (!k) return;
+          feature.set(k, parseImportPropertyValue(row.value));
+        });
+
+        // Apply elevation to 2D coordinates if elevation is non-zero
+        if (elev !== 0) {
           const geometry = feature.getGeometry();
           if (geometry) {
             console.log(`Feature ${index}: Geometry type: ${geometry.getType()}`);
@@ -149,7 +177,7 @@ export function importGeoJSON(
                 console.log(`Feature ${index}: Point coordinates before:`, coords);
                 console.log(`Feature ${index}: Point coordinates length:`, coords ? coords.length : 'undefined');
                 if (coords && coords.length === 2) {
-                  const newCoords = [coords[0], coords[1], elevation];
+                  const newCoords = [coords[0], coords[1], elev];
                   pointGeom.setCoordinates(newCoords);
                   console.log(`Feature ${index}: Point coordinates after elevation:`, newCoords);
                 } else if (coords && coords.length === 3) {
@@ -164,7 +192,7 @@ export function importGeoJSON(
                 if (coords && coords.length > 0) {
                   console.log(`Feature ${index}: First coord length:`, coords[0] ? coords[0].length : 'undefined');
                   if (coords[0].length === 2) {
-                    const newCoords = coords.map((coord: any) => [coord[0], coord[1], elevation]);
+                    const newCoords = coords.map((coord: any) => [coord[0], coord[1], elev]);
                     lineGeom.setCoordinates(newCoords);
                     console.log(`Feature ${index}: LineString coordinates after elevation:`, newCoords);
                   } else if (coords[0].length === 3) {
@@ -181,7 +209,7 @@ export function importGeoJSON(
                   console.log(`Feature ${index}: First ring first coord length:`, coords[0][0] ? coords[0][0].length : 'undefined');
                   if (coords[0][0].length === 2) {
                     const newCoords = coords.map((ring: any) => 
-                      ring.map((coord: any) => [coord[0], coord[1], elevation])
+                      ring.map((coord: any) => [coord[0], coord[1], elev])
                     );
                     polyGeom.setCoordinates(newCoords);
                     console.log(`Feature ${index}: Polygon coordinates after elevation:`, newCoords);
@@ -200,7 +228,7 @@ export function importGeoJSON(
                   if (coords[0][0][0].length === 2) {
                     const newCoords = coords.map((polygon: any) => 
                       polygon.map((ring: any) => 
-                        ring.map((coord: any) => [coord[0], coord[1], elevation])
+                        ring.map((coord: any) => [coord[0], coord[1], elev])
                       )
                     );
                     multiPolyGeom.setCoordinates(newCoords);
@@ -217,7 +245,7 @@ export function importGeoJSON(
             console.log(`Feature ${index}: No geometry found`);
           }
         } else {
-          console.log(`Feature ${index}: No elevation to apply (elevation = ${elevation})`);
+          console.log(`Feature ${index}: No elevation to apply (elevation = ${elev})`);
         }
       });
 

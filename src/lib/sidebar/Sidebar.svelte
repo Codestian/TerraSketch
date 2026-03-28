@@ -1,6 +1,7 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, onDestroy } from "svelte";
   import Button from "../common/Button.svelte";
+  import Modal from "../common/Modal.svelte";
   import * as turf from "@turf/turf";
   import { GeoJSON } from "ol/format";
   import {
@@ -10,6 +11,9 @@
     onSelectionChange,
     deleteSelectedFeatures,
     getSelectInteraction,
+    enableFreehandSelection,
+    disableFreehandSelection,
+    isFreehandSelectionActive,
   } from "../../utils/mapUtils";
   import { storeLayers } from "../../utils/saveLayers";
   import { getActiveLayer } from "../../utils/vectorLayerUtils";
@@ -18,6 +22,25 @@
   let selectedFeaturesCount = 0;
   let isMoveMode = true;
   let isModifyMode = false;
+  let freehandActive = false;
+  let showSettingsModal = false;
+  const appName = "TerrasEdit";
+  const appVersion = "2.0.0";
+  const unsubFreehand = isFreehandSelectionActive.subscribe((v) => (freehandActive = v));
+
+  function toggleSettingsModal() {
+    showSettingsModal = !showSettingsModal;
+  }
+
+  function toggleFreehandSelection() {
+    if (freehandActive) {
+      disableFreehandSelection();
+    } else {
+      enableFreehandSelection();
+    }
+  }
+
+  onDestroy(unsubFreehand);
 
   function toggleMoveMode() {
     enableMoveMode();
@@ -51,13 +74,17 @@
     enableDrawing("Point");
   }
 
+  function drawEllipse() {
+    enableDrawing("Ellipse");
+  }
+
   function deleteFeature() {
     deleteSelectedFeatures();
   }
 
   function unionFeatures() {
     console.log("Union feature clicked");
-    console.log("Selected polygons:", selectedFeaturesCount);
+    console.log("Selected features:", selectedFeaturesCount);
 
     // Get the selected features from the map
     const selectInteraction = getSelectInteraction();
@@ -73,53 +100,131 @@
       console.log("Selected features:", featuresArray);
 
       try {
-        // Convert OpenLayers features to GeoJSON format for Turf.js
+        // Convert OpenLayers features to GeoJSON format
         const format = new GeoJSON();
-        const geoJsonFeatures = featuresArray
+        
+        // Separate polygons and linestrings
+        const polygonFeatures = featuresArray
           .map((feature) => {
             const geometry = feature.getGeometry();
             if (!geometry) return null;
 
             const type = geometry.getType();
             if (type !== "Polygon" && type !== "MultiPolygon") {
-              console.log(`Skipping non-polygon feature of type: ${type}`);
               return null;
             }
 
-            return format.writeFeatureObject(feature);
+            return { feature, geoJson: format.writeFeatureObject(feature) };
           })
-          .filter(Boolean);
+          .filter((item): item is { feature: any; geoJson: any } => item !== null);
 
-        if (geoJsonFeatures.length < 2) {
-          console.log("Need at least 2 valid polygon features for union");
+        const lineStringFeatures = featuresArray
+          .map((feature) => {
+            const geometry = feature.getGeometry();
+            if (!geometry) return null;
+
+            const type = geometry.getType();
+            if (type !== "LineString" && type !== "MultiLineString") {
+              return null;
+            }
+
+            return { feature, geoJson: format.writeFeatureObject(feature) };
+          })
+          .filter((item): item is { feature: any; geoJson: any } => item !== null);
+
+        // Handle polygon union using Turf.js
+        if (polygonFeatures.length >= 2) {
+          const geoJsonFeatures = polygonFeatures.map(item => item.geoJson);
+          console.log("GeoJSON polygon features for union:", geoJsonFeatures);
+
+          // Perform union operation
+          let result = geoJsonFeatures[0];
+          for (let i = 1; i < geoJsonFeatures.length; i++) {
+            if (result && geoJsonFeatures[i]) {
+              // Create a FeatureCollection for the union operation
+              const featureCollection: any = {
+                type: "FeatureCollection" as const,
+                features: [result, geoJsonFeatures[i]],
+              };
+              // Use type assertion to bypass TypeScript strict checking
+              result = (turf.union as any)(featureCollection, geoJsonFeatures[i]);
+              if (!result) {
+                console.error("Union operation failed");
+                return;
+              }
+            }
+          }
+
+          console.log("Union result:", result);
+
+          // Convert result back to OpenLayers feature and add to map
+          if (result) {
+            const unionFeatures = format.readFeatures(result);
+            
+            if (unionFeatures.length > 0) {
+              const unionFeature = unionFeatures[0]; // Take the first feature
+
+              // Get the active layer to add the union result
+              const activeLayer = getActiveLayer();
+              if (activeLayer) {
+                const source = activeLayer.getSource();
+                if (source) {
+                  // Remove the original features
+                  polygonFeatures.forEach((item) => {
+                    source.removeFeature(item.feature);
+                  });
+
+                  // Add the union result to the same source/layer
+                  source.addFeature(unionFeature);
+                }
+              }
+
+              // Clear selection
+              selectInteraction.getFeatures().clear();
+              selectedFeaturesCount = 0;
+              featuresSelected = false;
+            }
+          }
           return;
         }
 
-        console.log("GeoJSON features for union:", geoJsonFeatures);
+        // Handle linestring combination (combine into MultiLineString)
+        if (lineStringFeatures.length >= 2) {
+          const geoJsonFeatures = lineStringFeatures.map(item => item.geoJson);
+          console.log("GeoJSON linestring features for union:", geoJsonFeatures);
 
-        // Perform union operation
-        let result = geoJsonFeatures[0];
-        for (let i = 1; i < geoJsonFeatures.length; i++) {
-          if (result && geoJsonFeatures[i]) {
-            // Create a FeatureCollection for the union operation
-            const featureCollection: any = {
-              type: "FeatureCollection" as const,
-              features: [result, geoJsonFeatures[i]],
-            };
-            // Use type assertion to bypass TypeScript strict checking
-            result = (turf.union as any)(featureCollection, geoJsonFeatures[i]);
-            if (!result) {
-              console.error("Union operation failed");
-              return;
+          // Extract all linestring coordinates
+          const allLineStringCoords: number[][][] = [];
+          
+          geoJsonFeatures.forEach((geoJsonFeature) => {
+            if (geoJsonFeature.geometry.type === "LineString") {
+              allLineStringCoords.push(geoJsonFeature.geometry.coordinates);
+            } else if (geoJsonFeature.geometry.type === "MultiLineString") {
+              geoJsonFeature.geometry.coordinates.forEach((coords: number[][]) => {
+                allLineStringCoords.push(coords);
+              });
             }
+          });
+
+          if (allLineStringCoords.length < 2) {
+            console.log("Failed to extract enough linestrings for union");
+            return;
           }
-        }
 
-        console.log("Union result:", result);
+          // Create a MultiLineString GeoJSON feature
+          const multiLineStringGeoJson = {
+            type: "Feature",
+            geometry: {
+              type: "MultiLineString",
+              coordinates: allLineStringCoords
+            },
+            properties: geoJsonFeatures[0].properties || {}
+          };
 
-        // Convert result back to OpenLayers feature and add to map
-        if (result) {
-          const unionFeatures = format.readFeatures(result);
+          console.log("MultiLineString result:", multiLineStringGeoJson);
+
+          // Convert result back to OpenLayers feature and add to map
+          const unionFeatures = format.readFeatures(multiLineStringGeoJson);
           
           if (unionFeatures.length > 0) {
             const unionFeature = unionFeatures[0]; // Take the first feature
@@ -130,8 +235,8 @@
               const source = activeLayer.getSource();
               if (source) {
                 // Remove the original features
-                featuresArray.forEach((feature) => {
-                  source.removeFeature(feature);
+                lineStringFeatures.forEach((item) => {
+                  source.removeFeature(item.feature);
                 });
 
                 // Add the union result to the same source/layer
@@ -144,7 +249,10 @@
             selectedFeaturesCount = 0;
             featuresSelected = false;
           }
+          return;
         }
+
+        console.log("Need at least 2 valid polygon or linestring features for union");
       } catch (error) {
         console.error("Error performing union operation:", error);
       }
@@ -356,10 +464,18 @@
 <aside class="sidebar">
   <div class="top-buttons">
     {#if !featuresSelected}
-      <Button iconClass="fas fa-slash" label="" onClick={drawLineString} />
-      <Button iconClass="fas fa-draw-polygon" label="" onClick={drawPolygon} />
-      <Button iconClass="fas fa-circle" label="" onClick={drawCircle} />
-      <Button iconClass="far fa-square" label="" onClick={drawRectangle} />
+      <Button
+        iconClass="fas fa-object-ungroup"
+        label=""
+        onClick={toggleFreehandSelection}
+        bordered={freehandActive}
+        tooltip="Freehand select"
+      />
+      <Button iconClass="fas fa-slash" label="" onClick={drawLineString} tooltip="Draw line" />
+      <Button iconClass="fas fa-draw-polygon" label="" onClick={drawPolygon} tooltip="Draw polygon" />
+      <Button iconClass="far fa-square" label="" onClick={drawRectangle} tooltip="Draw rectangle" />
+      <Button iconClass="fas fa-circle" label="" onClick={drawCircle} tooltip="Draw circle" />
+      <Button iconClass="fas fa-egg" label="" onClick={drawEllipse} tooltip="Draw oval" />
     {/if}
     {#if featuresSelected}
       <Button
@@ -367,43 +483,58 @@
         label=""
         onClick={toggleMoveMode}
         bordered={isMoveMode}
+        tooltip="Move selected"
       />
       <Button
         iconClass="fas fa-pen-fancy"
         label=""
         onClick={toggleModifyMode}
         bordered={isModifyMode}
+        tooltip="Modify selected"
       />
       <Button
         iconClass="fas fa-trash-can"
         label=""
         onClick={deleteFeature}
         danger
+        tooltip="Delete selected"
       />
       {#if selectedFeaturesCount >= 2}
         <Button
           iconClass="fas fa-layer-group"
           label=""
           onClick={unionFeatures}
+          tooltip="Combine"
         />
         <Button
           iconClass="fas fa-minus"
           label=""
           onClick={differenceFeature}
+          tooltip="Subtract"
         />
         <Button
           iconClass="fas fa-times"
           label=""
           onClick={intersectionFeature}
+          tooltip="Overlap"
         />
       {/if}
     {/if}
   </div>
   <div class="bottom-buttons">
-    <Button iconClass="fas fa-info" label="" />
-    <Button iconClass="fas fa-cog" label="" />
+    <Button iconClass="fas fa-cog" label="" onClick={toggleSettingsModal} tooltip="Settings" />
   </div>
 </aside>
+
+<Modal title="Settings" show={showSettingsModal} on:close={toggleSettingsModal}>
+  <div class="settings-modal-content">
+    <div class="settings-app-card">
+      <div class="settings-app-name">{appName}</div>
+      <div class="settings-app-version-label">Version</div>
+      <div class="settings-app-version">{appVersion}</div>
+    </div>
+  </div>
+</Modal>
 
 <style lang="scss">
   .sidebar {
@@ -427,5 +558,37 @@
     flex-direction: column;
     align-items: center;
     gap: calc((48px - 36px) / 2);
+  }
+
+  .settings-modal-content {
+    padding: 16px;
+    color: white;
+  }
+
+  .settings-app-card {
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    background: rgba(255, 255, 255, 0.04);
+    padding: 14px;
+  }
+
+  .settings-app-name {
+    font-size: 0.95rem;
+    font-weight: 700;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    margin-bottom: 10px;
+  }
+
+  .settings-app-version-label {
+    font-size: 0.7rem;
+    opacity: 0.75;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    margin-bottom: 4px;
+  }
+
+  .settings-app-version {
+    font-size: 1.1rem;
+    font-weight: 700;
   }
 </style>
