@@ -3,9 +3,12 @@ import OLMap from "ol/Map";
 import Select from "ol/interaction/Select";
 import VectorLayer from "ol/layer/Vector";
 import VectorSource from "ol/source/Vector";
-import { GeoJSON } from "ol/format";
+import GeoJSON from "ol/format/GeoJSON";
+import KML from "ol/format/KML";
 import type { Extent } from "ol/extent";
+import type Projection from "ol/proj/Projection";
 import { Style } from "ol/style";
+import { unzipSync } from "fflate";
 import { generateUniqueId } from "./mapUtils";
 
 export let vectorLayers: { [key: string]: VectorLayer<VectorSource> } = {};
@@ -130,148 +133,157 @@ export function createVectorLayer(name: string, ctx: LayerContext): VectorLayer<
   return newVectorLayer;
 }
 
-export function importGeoJSON(
-  file: File,
-  options: ImportOptions,
-  ctx: LayerContext
-): Promise<void> {
+/** Detect format from filename (KMZ is unzipped to KML text before parsing). */
+export function fileImportKind(file: File): "geojson" | "kml" | "kmz" {
+  const n = file.name.toLowerCase();
+  if (n.endsWith(".kmz")) return "kmz";
+  if (n.endsWith(".kml")) return "kml";
+  return "geojson";
+}
+
+function readImportText(file: File): Promise<string> {
+  if (fileImportKind(file) === "kmz") {
+    return file.arrayBuffer().then((buf) => {
+      const out = unzipSync(new Uint8Array(buf));
+      const keys = Object.keys(out);
+      const docKml =
+        keys.find((k) => (k.split("/").pop() ?? "").toLowerCase() === "doc.kml") ||
+        keys.find((k) => k.toLowerCase().endsWith(".kml"));
+      if (!docKml) {
+        throw new Error("KMZ archive does not contain doc.kml or another .kml file");
+      }
+      return new TextDecoder("utf-8").decode(out[docKml]);
+    });
+  }
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
-    reader.onload = (event) => {
-      const geoJsonData = event.target?.result as string;
-      console.log('Raw GeoJSON data:', geoJsonData.substring(0, 500) + '...');
-      
-      const format = new GeoJSON();
-      const features = format.readFeatures(geoJsonData, {
-        featureProjection: ctx.map.getView().getProjection(),
-      });
-
-      const rows = (options.propertyRows || []).filter((r) => r.key.trim().length > 0);
-      const elevRow = rows.find((r) => r.key.trim().toLowerCase() === "elevation");
-      const elevation = elevRow ? parseFloat(elevRow.value) : 0;
-      const elev = Number.isFinite(elevation) ? elevation : 0;
-
-      console.log("Importing GeoJSON with options:", { propertyRows: rows, elevation: elev });
-      console.log('Number of features to process:', features.length);
-      console.log('Map projection:', ctx.map.getView().getProjection().getCode());
-
-      features.forEach((feature: Feature, index: number) => {
-        rows.forEach((row) => {
-          const k = row.key.trim();
-          if (!k) return;
-          feature.set(k, parseImportPropertyValue(row.value));
-        });
-
-        // Apply elevation to 2D coordinates if elevation is non-zero
-        if (elev !== 0) {
-          const geometry = feature.getGeometry();
-          if (geometry) {
-            console.log(`Feature ${index}: Geometry type: ${geometry.getType()}`);
-            console.log(`Feature ${index}: Geometry extent:`, geometry.getExtent());
-            
-            try {
-              // For Point geometry
-              if (geometry.getType() === 'Point') {
-                const pointGeom = geometry as any;
-                const coords = pointGeom.getCoordinates();
-                console.log(`Feature ${index}: Point coordinates before:`, coords);
-                console.log(`Feature ${index}: Point coordinates length:`, coords ? coords.length : 'undefined');
-                if (coords && coords.length === 2) {
-                  const newCoords = [coords[0], coords[1], elev];
-                  pointGeom.setCoordinates(newCoords);
-                  console.log(`Feature ${index}: Point coordinates after elevation:`, newCoords);
-                } else if (coords && coords.length === 3) {
-                  console.log(`Feature ${index}: Point already has 3D coordinates:`, coords);
-                }
-              }
-              // For LineString geometry
-              else if (geometry.getType() === 'LineString') {
-                const lineGeom = geometry as any;
-                const coords = lineGeom.getCoordinates();
-                console.log(`Feature ${index}: LineString coordinates before:`, coords);
-                if (coords && coords.length > 0) {
-                  console.log(`Feature ${index}: First coord length:`, coords[0] ? coords[0].length : 'undefined');
-                  if (coords[0].length === 2) {
-                    const newCoords = coords.map((coord: any) => [coord[0], coord[1], elev]);
-                    lineGeom.setCoordinates(newCoords);
-                    console.log(`Feature ${index}: LineString coordinates after elevation:`, newCoords);
-                  } else if (coords[0].length === 3) {
-                    console.log(`Feature ${index}: LineString already has 3D coordinates`);
-                  }
-                }
-              }
-              // For Polygon geometry
-              else if (geometry.getType() === 'Polygon') {
-                const polyGeom = geometry as any;
-                const coords = polyGeom.getCoordinates();
-                console.log(`Feature ${index}: Polygon coordinates before:`, coords);
-                if (coords && coords.length > 0 && coords[0].length > 0) {
-                  console.log(`Feature ${index}: First ring first coord length:`, coords[0][0] ? coords[0][0].length : 'undefined');
-                  if (coords[0][0].length === 2) {
-                    const newCoords = coords.map((ring: any) => 
-                      ring.map((coord: any) => [coord[0], coord[1], elev])
-                    );
-                    polyGeom.setCoordinates(newCoords);
-                    console.log(`Feature ${index}: Polygon coordinates after elevation:`, newCoords);
-                  } else if (coords[0][0].length === 3) {
-                    console.log(`Feature ${index}: Polygon already has 3D coordinates`);
-                  }
-                }
-              }
-              // For MultiPolygon geometry
-              else if (geometry.getType() === 'MultiPolygon') {
-                const multiPolyGeom = geometry as any;
-                const coords = multiPolyGeom.getCoordinates();
-                console.log(`Feature ${index}: MultiPolygon coordinates before:`, coords);
-                if (coords && coords.length > 0 && coords[0].length > 0 && coords[0][0].length > 0) {
-                  console.log(`Feature ${index}: First polygon first ring first coord length:`, coords[0][0][0] ? coords[0][0][0].length : 'undefined');
-                  if (coords[0][0][0].length === 2) {
-                    const newCoords = coords.map((polygon: any) => 
-                      polygon.map((ring: any) => 
-                        ring.map((coord: any) => [coord[0], coord[1], elev])
-                      )
-                    );
-                    multiPolyGeom.setCoordinates(newCoords);
-                    console.log(`Feature ${index}: MultiPolygon coordinates after elevation:`, newCoords);
-                  } else if (coords[0][0][0].length === 3) {
-                    console.log(`Feature ${index}: MultiPolygon already has 3D coordinates`);
-                  }
-                }
-              }
-            } catch (error) {
-              console.warn(`Error applying elevation to feature ${index}:`, error);
-            }
-          } else {
-            console.log(`Feature ${index}: No geometry found`);
-          }
-        } else {
-          console.log(`Feature ${index}: No elevation to apply (elevation = ${elev})`);
-        }
-      });
-
-      const uniqueId = generateUniqueId();
-      const layerId = `layer-${uniqueId}`;
-      const geoJsonLayer = new VectorLayer({
-        source: new VectorSource({ features }),
-        style: ctx.inactiveLayerFeatureStyle,
-      });
-
-      geoJsonLayer.set("id", layerId);
-      geoJsonLayer.set("name", file.name);
-
-      vectorLayers[layerId] = geoJsonLayer;
-      ctx.map.addLayer(geoJsonLayer);
-
-      const extent: Extent = geoJsonLayer.getSource()!.getExtent();
-      ctx.map.getView().fit(extent, { padding: [50, 50, 50, 50], duration: 1000 });
-
-      console.log('Import completed successfully');
-      resolve();
-    };
-
-    reader.onerror = (error) => reject(error);
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = () => reject(reader.error);
     reader.readAsText(file);
   });
 }
 
+function parseImportFeatures(
+  text: string,
+  kind: "geojson" | "kml" | "kmz",
+  featureProjection: Projection
+): Feature[] {
+  if (kind === "kml" || kind === "kmz") {
+    const kmlFormat = new KML({ extractStyles: false });
+    return kmlFormat.readFeatures(text, {
+      featureProjection,
+      dataProjection: "EPSG:4326",
+    });
+  }
+  const geoJsonFormat = new GeoJSON();
+  return geoJsonFormat.readFeatures(text, { featureProjection });
+}
 
+function applyImportOptionsToFeatures(features: Feature[], options: ImportOptions): void {
+  const rows = (options.propertyRows || []).filter((r) => r.key.trim().length > 0);
+  const elevRow = rows.find((r) => r.key.trim().toLowerCase() === "elevation");
+  const elevation = elevRow ? parseFloat(elevRow.value) : 0;
+  const elev = Number.isFinite(elevation) ? elevation : 0;
+
+  features.forEach((feature: Feature, index: number) => {
+    rows.forEach((row) => {
+      const k = row.key.trim();
+      if (!k) return;
+      feature.set(k, parseImportPropertyValue(row.value));
+    });
+
+    if (elev !== 0) {
+      const geometry = feature.getGeometry();
+      if (geometry) {
+        try {
+          if (geometry.getType() === "Point") {
+            const pointGeom = geometry as any;
+            const coords = pointGeom.getCoordinates();
+            if (coords && coords.length === 2) {
+              pointGeom.setCoordinates([coords[0], coords[1], elev]);
+            }
+          } else if (geometry.getType() === "LineString") {
+            const lineGeom = geometry as any;
+            const coords = lineGeom.getCoordinates();
+            if (coords && coords.length > 0 && coords[0].length === 2) {
+              lineGeom.setCoordinates(
+                coords.map((coord: number[]) => [coord[0], coord[1], elev])
+              );
+            }
+          } else if (geometry.getType() === "Polygon") {
+            const polyGeom = geometry as any;
+            const coords = polyGeom.getCoordinates();
+            if (coords && coords.length > 0 && coords[0].length > 0 && coords[0][0].length === 2) {
+              polyGeom.setCoordinates(
+                coords.map((ring: number[][]) =>
+                  ring.map((coord: number[]) => [coord[0], coord[1], elev])
+                )
+              );
+            }
+          } else if (geometry.getType() === "MultiPolygon") {
+            const multiPolyGeom = geometry as any;
+            const coords = multiPolyGeom.getCoordinates();
+            if (
+              coords &&
+              coords.length > 0 &&
+              coords[0].length > 0 &&
+              coords[0][0].length > 0 &&
+              coords[0][0][0].length === 2
+            ) {
+              multiPolyGeom.setCoordinates(
+                coords.map((polygon: number[][][]) =>
+                  polygon.map((ring: number[][]) =>
+                    ring.map((coord: number[]) => [coord[0], coord[1], elev])
+                  )
+                )
+              );
+            }
+          }
+        } catch (error) {
+          console.warn(`Error applying elevation to feature ${index}:`, error);
+        }
+      }
+    }
+  });
+}
+
+function fitMapToExtent(map: OLMap, extent: Extent): void {
+  if (extent.every((v) => Number.isFinite(v))) {
+    map.getView().fit(extent, { padding: [50, 50, 50, 50], duration: 1000 });
+  }
+}
+
+/**
+ * Import GeoJSON (.geojson, .json), KML (.kml), or KMZ (.kmz) as a new vector layer.
+ */
+export function importVectorFile(
+  file: File,
+  options: ImportOptions,
+  ctx: LayerContext
+): Promise<void> {
+  return readImportText(file).then((text) => {
+    const kind = fileImportKind(file);
+    const proj = ctx.map.getView().getProjection();
+    const features = parseImportFeatures(text, kind, proj);
+    applyImportOptionsToFeatures(features, options);
+
+    const uniqueId = generateUniqueId();
+    const layerId = `layer-${uniqueId}`;
+    const importedLayer = new VectorLayer({
+      source: new VectorSource({ features }),
+      style: ctx.inactiveLayerFeatureStyle,
+    });
+
+    importedLayer.set("id", layerId);
+    importedLayer.set("name", file.name);
+
+    vectorLayers[layerId] = importedLayer;
+    ctx.map.addLayer(importedLayer);
+
+    const extent = importedLayer.getSource()!.getExtent();
+    fitMapToExtent(ctx.map, extent);
+  });
+}
+
+/** @deprecated Use importVectorFile — kept for existing call sites. */
+export const importGeoJSON = importVectorFile;

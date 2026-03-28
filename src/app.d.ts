@@ -10,5 +10,10 @@ declare global {
 	}
 }
 
+interface ImportMetaEnv {
+	/** Set to `"true"` at build time to enable internal-only UI (e.g. Export in game). */
+	readonly VITE_EXPORT_IN_GAME?: string;
+}
+
 export {};
 

@@ -53,7 +53,7 @@
 <Modal title="Get started" show={showModal} on:close={dismiss}>
   <div class="welcome-body">
     <p class="welcome-text">
-      Create a new layer to start drawing, or import a GeoJSON file.
+      Create a new layer to start drawing, or import GeoJSON or KML.
     </p>
     <div class="welcome-actions">
       <button type="button" class="welcome-tile" on:click={onCreateLayer}>
@@ -66,7 +66,7 @@
       </button>
       <input
         type="file"
-        accept=".geojson"
+        accept=".geojson,.json,.kml,.kmz,application/geo+json,application/vnd.google-earth.kml+xml,application/vnd.google-earth.kmz"
         bind:this={fileInput}
         on:change={onFileChange}
         style="display: none;"

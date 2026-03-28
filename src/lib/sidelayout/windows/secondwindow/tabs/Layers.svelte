@@ -4,7 +4,7 @@
   import {
     removeVectorLayer,
     setActiveLayer,
-    importGeoJSON,
+    importVectorFile,
     renameLayer,
     DEFAULT_IMPORT_PROPERTY_ROWS,
     type ImportPropertyRow,
@@ -43,7 +43,9 @@
     deleteVectorLayerById,
   } from "../../../../../utils/saveLayers";
   import GeoJSON from "ol/format/GeoJSON";
-  
+
+  /** Internal builds: set `VITE_EXPORT_IN_GAME=true` (see `npm run dev:internal` / `build:internal`). */
+  const exportInGameEnabled = import.meta.env.VITE_EXPORT_IN_GAME === "true";
 
   let newLayerName: string = "";
 
@@ -248,6 +250,10 @@
     } else {
       alert('Invalid export tab.');
     }
+  }
+
+  function exportInGame() {
+    console.log("hello world");
   }
 
   // Computed values for feature types
@@ -489,7 +495,7 @@
 
     try {
       const importFileName = file?.name ?? "Imported.geojson";
-      await importGeoJSON(
+      await importVectorFile(
         file,
         { propertyRows: importPropertyRows },
         getVectorLayerContext()
@@ -504,7 +510,7 @@
       setActiveLayer(newLayerId, getVectorLayerContext());
       selectedLayerIdStore.set(newLayerId);
     } catch (error: any) {
-      importErrorMessage = `Error importing GeoJSON file: ${error}`;
+      importErrorMessage = `Error importing file: ${error}`;
     } finally {
       showImportProgress = false;
       pendingImportFile.set(null);
@@ -600,7 +606,7 @@
     layersStore.update(arr => arr.map(l => l.id === layer.id ? { ...l, visible: layer.visible } : l));
   }
 
-  // Function to handle GeoJSON file import
+  // GeoJSON / KML / KMZ import (opens confirmation modal)
   async function handleImport(event: Event) {
     const input = event.target as HTMLInputElement;
     const file = input.files?.[0];
@@ -840,12 +846,75 @@
     min-height: 300px; /* Ensure minimum content height */
   }
 
+  .export-format-about {
+    margin: 0 0 16px;
+    padding: 12px 14px;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 2px;
+
+    p {
+      margin: 0;
+      font-size: 0.72rem;
+      line-height: 1.45;
+      color: rgba(255, 255, 255, 0.82);
+      letter-spacing: 0.2px;
+    }
+
+    code {
+      font-size: 0.7rem;
+      padding: 1px 4px;
+      background: rgba(0, 0, 0, 0.35);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 2px;
+    }
+  }
+
   .export-button-container {
     padding: 12px;
     border-top: 1px solid rgba(255, 255, 255, 0.1);
     background-color: rgba(255, 255, 255, 0.05);
     display: flex;
+    flex-direction: row;
     justify-content: flex-end;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+
+  .export-in-game-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    min-height: 36px;
+    padding: 0 14px;
+    margin: 0;
+    font-size: 0.6rem;
+    font-weight: bold;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    color: #fff;
+    cursor: pointer;
+    border: none;
+    border-top: 3px solid rgba(255, 255, 255, 0.2);
+    border-left: 3px solid rgba(255, 255, 255, 0.12);
+    border-bottom: 3px solid rgba(0, 0, 0, 0.35);
+    border-right: 3px solid rgba(0, 0, 0, 0.25);
+    background-color: #2f6fad;
+    transition: background-color 0.25s ease;
+
+    i {
+      font-size: 0.85rem;
+    }
+
+    &:hover {
+      background-color: #256090;
+    }
+
+    &:active {
+      background-color: #1d4d82;
+    }
   }
 
   .detail-row {
@@ -1127,6 +1196,12 @@
     <div class="export-content">
       <div class="scrollable-content">        
                 {#if selectedExportTab === 'GeoJSON'}
+          <div class="export-format-about">
+            <p>
+              It is a JSON format for geographic data: features, geometry, and properties.
+              Use it with GIS tools, other map apps, or to import the layer back into TerraSketch.
+            </p>
+          </div>
           <div class="geojson-preview">
             <div class="detail-label">Preview (First Feature):</div>
             <div class="preview-content">
@@ -1196,6 +1271,12 @@
             {/if}
           </div>
         {:else if selectedExportTab === 'KML'}
+          <div class="export-format-about">
+            <p>
+              It is an XML format (Keyhole Markup Language) for Google Earth and many desktop and web map viewers.
+              Placemarks and geometry are stored with coordinates in a single portable file.
+            </p>
+          </div>
           <div class="kml-preview">
             <div class="detail-label">Preview (First Feature):</div>
             <div class="preview-content">
@@ -1265,6 +1346,12 @@
             {/if}
           </div>
         {:else if selectedExportTab === 'Schematic'}
+          <div class="export-format-about">
+            <p>
+              It is a compressed Minecraft structure format (Sponge / WorldEdit style), saved as <code>.schem</code>.
+              Use it to paste builds into worlds with compatible mods or server tools.
+            </p>
+          </div>
           <div class="schematic-export">
             <div class="schematic-options">
               <div class="option-group">
@@ -1391,7 +1478,13 @@
       </div>
       
       <div class="export-button-container">
-        <Button 
+        {#if selectedExportTab === "Schematic" && exportInGameEnabled}
+          <button type="button" class="export-in-game-btn" on:click={exportInGame}>
+            <i class="fas fa-gamepad" aria-hidden="true"></i>
+            Export in game
+          </button>
+        {/if}
+        <Button
           iconClass="fas fa-download"
           label="Export"
           onClick={handleExport}

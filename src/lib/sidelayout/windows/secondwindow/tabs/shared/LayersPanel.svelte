@@ -123,7 +123,7 @@
       {#if showImportButton}
         <input
           type="file"
-          accept=".geojson"
+          accept=".geojson,.json,.kml,.kmz,application/geo+json,application/vnd.google-earth.kml+xml,application/vnd.google-earth.kmz"
           on:change={handleFileChange}
           bind:this={fileInput}
           style="display: none;"
@@ -298,7 +298,7 @@
 {/if}
 
 {#if showImportButton}
-<Modal title="Import GeoJSON" show={showImportConfirm} on:close={onCloseImportConfirm}>
+<Modal title="Import layer" show={showImportConfirm} on:close={onCloseImportConfirm}>
   <div class="import-confirm">
     <p class="import-lead">This file will be added as a new layer.</p>
     <div class="import-file-card">
@@ -394,7 +394,7 @@
     <div class="progress-bar">
       <div class="progress-bar-fill"></div>
     </div>
-    <p class="import-progress-text">Importing GeoJSON…</p>
+    <p class="import-progress-text">Importing file…</p>
   </div>
 </Modal>
 

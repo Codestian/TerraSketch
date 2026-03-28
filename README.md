@@ -13,6 +13,15 @@
 3. To run in development mode, run `npm run dev`.
 4. To generate static files, run `npm run build`.
 
+### Internal deployment (Export in game)
+
+The public Cloudflare build uses `npm run dev` and `npm run build` as above. For an **internal** setup that shows the **Export in game** button on the Schematic export tab, use:
+
+- **Development:** `npm run dev:internal`
+- **Production build:** `npm run build:internal`
+
+These set `VITE_EXPORT_IN_GAME=true` at build time. You can also set the same variable yourself: `VITE_EXPORT_IN_GAME=true npm run dev`.
+
 ## Features
 
 - Categorize and save your work outlining with layers.

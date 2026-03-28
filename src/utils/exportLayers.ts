@@ -4,7 +4,17 @@ import { writeUncompressed, type NBT, TagType } from "prismarine-nbt";
 import type { FeatureExport } from "./iFeatureExprt";
 import { fromGeo } from "@bte-germany/terraconvert";
 
-
+/**
+ * Ensures a download filename ends with the given extension (does not duplicate if already present).
+ */
+export function ensureFilenameExtension(filename: string, extension: string): string {
+  const ext = extension.startsWith(".") ? extension : `.${extension}`;
+  const base = (filename || "export").trim() || "export";
+  const lower = base.toLowerCase();
+  const extLower = ext.toLowerCase();
+  if (lower.endsWith(extLower)) return base;
+  return `${base}${ext}`;
+}
 
 /**
  * Transforms coordinates from one spatial reference system to another.
@@ -250,10 +260,12 @@ export async function saveGeoJsonFile(jsonString: string, filename: string = 'ex
   // Convert the JSON object to a Blob
   const blob = new Blob([JSON.stringify(jsonObject, null, 2)], { type: 'application/geo+json' });
 
+  const downloadName = ensureFilenameExtension(filename, ".geojson");
+
   // Use the traditional download method for immediate download
   const link = document.createElement('a');
   link.href = URL.createObjectURL(blob);
-  link.download = filename; // Use the provided filename
+  link.download = downloadName;
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
@@ -273,10 +285,12 @@ export async function saveKmlFile(jsonString: string, filename: string = 'export
     // Create a Blob with the KML content
     const blob = new Blob([kmlString], { type: 'application/vnd.google-earth.kml+xml' });
 
+    const downloadName = ensureFilenameExtension(filename, ".kml");
+
     // Use the traditional download method for immediate download
     const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
-    link.download = filename;
+    link.download = downloadName;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -664,10 +678,12 @@ export async function saveSchematicFile(features: FeatureExport[], versionNo: nu
     // Create a Blob from the compressed data
     const blob = new Blob([compressed], { type: "application/octet-stream" });
   
+    const downloadName = ensureFilenameExtension(filename, ".schem");
+
     // Create a link to download the Blob as a .schem file
     const link = document.createElement("a");
     link.href = URL.createObjectURL(blob);
-    link.download = `${filename}.schem`;
+    link.download = downloadName;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
